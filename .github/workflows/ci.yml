@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-rubrics-and-test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build rubrics.json from the pinned playbook submodule
+        run: python3 scripts/build_rubrics.py
+      - name: Install backend
+        run: pip install -e "backend[dev]"
+      - name: Run backend tests
+        run: pytest backend/tests -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rubrics-json
+          path: content/rubrics.json
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    needs: build-rubrics-and-test-backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build rubrics.json (frontend tests check consistency against it)
+        run: python3 scripts/build_rubrics.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+      - name: Type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+      - name: Run frontend tests (pure logic + content consistency, no live API calls)
+        working-directory: frontend
+        run: npm test
