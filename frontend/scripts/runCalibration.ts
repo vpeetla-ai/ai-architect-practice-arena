@@ -19,13 +19,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openaiAdapter } from "../lib/judge/openaiAdapter";
 import { anthropicAdapter } from "../lib/judge/anthropicAdapter";
-import type { JudgeAdapter, Level, Rubric } from "../lib/judge/types";
+import type { JudgeAdapter, Level, Rubric, SectionedAnswer } from "../lib/judge/types";
+
+type CalibrationAnswer = Omit<SectionedAnswer, "high_level_design_image_url">;
 
 interface CalibrationCase {
   question_id: string;
-  weak_answer: string;
+  weak_answer: CalibrationAnswer;
   expected_weak_level: Level;
-  strong_answer: string;
+  strong_answer: CalibrationAnswer;
   expected_strong_level: Level;
 }
 
@@ -54,7 +56,7 @@ function withinOneStep(assessed: Level, expected: Level): boolean {
 async function runAdapterAgainstCase(
   adapter: JudgeAdapter,
   rubric: Rubric,
-  answer: string,
+  answer: SectionedAnswer,
   expected: Level,
   apiKey: string,
 ): Promise<{ pass: boolean; assessed: Level | "ERROR"; detail: string }> {
