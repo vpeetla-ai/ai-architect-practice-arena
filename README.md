@@ -27,7 +27,7 @@ direct browser calls; a minimal stateless proxy fixes it without ever storing a 
 | Rubric parser (`scripts/build_rubrics.py`) | ✅ Real, tested — parses 10 questions cleanly, CI-gated against silent gaps |
 | Backend (`backend/`) | ✅ Real, tested — verified via a real running HTTP server, 9 passing pytest tests |
 | Frontend (`frontend/`) | ✅ Real, tested — verified end-to-end in a real browser against both live provider APIs (with placeholder keys) |
-| Judge calibration (`content/calibration/`) | 🟡 Written and wired, **not yet run against live providers** — see [docs/adr/0001](docs/adr/0001-byok-judge-architecture.md) |
+| Judge calibration (`content/calibration/`) | ✅ Run against live providers, **40/40 passed** — see [docs/adr/0001](docs/adr/0001-byok-judge-architecture.md) (a real bug was found and fixed on the first run: OpenAI's adapter broke outside a browser context) |
 | Coverage | 10 of 35 playbook questions (the 3 folders sharing one rubric shape); `behavioral/` and `scalability-governance-tradeoffs/` need a different rubric design |
 | Deployment | Not yet deployed — verified locally only so far |
 

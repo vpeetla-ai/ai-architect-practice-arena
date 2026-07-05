@@ -77,14 +77,33 @@ server at all for Anthropic.
   catch-all segment (`app/practice/[...questionId]/`), not a single dynamic segment — a single
   segment silently fails to match paths containing `/`.
 
-## Calibration status
+## Calibration status — run for real, 2026-07-05
 
 `content/calibration/manifest.json` holds one deliberately weak and one deliberately strong
-reference answer per question in the Phase 1 slice, with expected judge-verdict ranges, and
-`frontend/scripts/runCalibration.ts` runs both judges against the full set for real. As of this
-ADR, this has **not yet been run against live providers** — it requires a real, personally-held
-API key, and running it is the pre-launch gate before this tool is presented as a working judge,
-not just a wired one. This is disclosed here rather than implied as already verified.
+reference answer per question in the Phase 1 slice, and `frontend/scripts/runCalibration.ts` runs
+both judges against the full set for real. This has now been run twice against live providers,
+with a real bug found and fixed in between:
+
+**First run: 20/40 passed, 20/20 failed identically.** Every OpenAI case failed with
+`TypeError: Failed to parse URL from /api/openai-proxy` — the adapter's default base URL is a
+relative path meant to resolve against a browser's same origin; Node's `fetch()` (which is what
+the calibration script uses, not a browser) has no origin to resolve it against, so it throws
+immediately, before ever reaching the network. CORS — the entire reason the proxy exists — is a
+browser-only restriction and doesn't apply to a Node script at all. **Every Anthropic case
+passed (20/20)** in this same run, a real, independent positive signal for the harness itself
+that arrived before the OpenAI bug was even fixed.
+
+**Fix**: the adapter now picks its default base per runtime context — the same-origin proxy when
+`typeof window !== "undefined"` (a real browser), OpenAI's endpoint directly otherwise (Node has
+no CORS restriction to route around). Re-verified live in the browser afterward with a
+placeholder key to confirm no regression: the browser path still correctly routes through
+`/api/openai-proxy` (confirmed via the real network log).
+
+**Second run, after the fix: 40/40 passed.** Both judges assessed every weak reference answer as
+Mid-level or Senior and every strong reference answer as Staff+ or Principal, across all 10
+questions in the Phase 1 slice, using real API keys against the real OpenAI (`gpt-4.1-mini`) and
+Anthropic (`claude-sonnet-4-5`) APIs. This is the pre-launch calibration gate, cleared — the
+judge harness demonstrably grades in the expected direction, not just "runs without crashing."
 
 ## Consequences
 
@@ -104,8 +123,10 @@ not just a wired one. This is disclosed here rather than implied as already veri
   `ai-system-design/` entries, 4 `general-system-design/`, 3 `cloud-architecture/`, all of
   `behavioral/` and `scalability-governance-tradeoffs/`) need either the same rubric parser
   extended, or — for the STAR/framework folders — a genuinely different rubric design.
-- The calibration set exists and is wired but hasn't been run against real providers yet —
-  the harness's actual grading accuracy is unverified until that gate is cleared.
+- Calibration (40/40, see above) only covers one weak and one strong answer per question — real
+  answers in practice will span a much wider range of quality and style than these two
+  deliberately clear-cut reference points, so this is evidence the harness works in the direction
+  intended, not proof it's accurate across the full spectrum of real, messier answers.
 
 ## References
 - [ai-architect-interview-playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook) — the rubric source of truth
