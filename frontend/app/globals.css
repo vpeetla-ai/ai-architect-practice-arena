@@ -144,21 +144,6 @@ a {
   margin: 2rem 0 0.75rem;
 }
 
-.question-card {
-  display: block;
-  border: 1px solid #1e2431;
-  border-radius: 0.75rem;
-  padding: 1rem 1.25rem;
-  margin-bottom: 0.75rem;
-  text-decoration: none;
-  color: inherit;
-  background: #10141d;
-}
-
-.question-card:hover {
-  border-color: #3a4257;
-}
-
 textarea {
   width: 100%;
   min-height: 220px;

@@ -214,6 +214,19 @@ navigation (RSC fetch, not a full page reload) while the sidebar and right rail 
 active-question highlight matches the real URL after the async transition completes; the layout
 collapses to a single stacked column below 900px for mobile.
 
+**Second follow-up, same day: single persistent screen.** The sidebar living only in
+`app/practice/layout.tsx` meant the home page (`/`) and a practice page (`/practice/[id]`) were
+still two visually different screens — landing on `/` showed a full-page list of question cards
+with no sidebar, then navigating to a question replaced the whole screen with the three-pane
+layout. Moved the sidebar into the root `app/layout.tsx` (now an async server component fetching
+questions once for every route) so it's present from the very first paint; deleted
+`app/practice/layout.tsx` entirely; simplified `app/page.tsx` to a short welcome message shown in
+the shared content area (the question list already lives in the sidebar, so the home page no
+longer duplicates it). Removed the now-dead `.question-card` CSS rule. Verified live: `/` renders
+with the sidebar already visible, clicking any question swaps in that question's form and right
+rail without a screen-level jump, and the active-highlight/URL/header-text all agree after the
+transition settles.
+
 ## Consequences
 
 ### Positive
