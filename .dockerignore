@@ -1,0 +1,6 @@
+content/playbook/
+frontend/
+.git/
+.github/
+docs/
+*.md

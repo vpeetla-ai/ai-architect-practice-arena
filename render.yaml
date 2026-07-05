@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: practice-arena-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    branch: master
