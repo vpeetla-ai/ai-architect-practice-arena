@@ -8,13 +8,23 @@ const OPENAI_MODEL = "gpt-4.1-mini";
  * chat completions endpoint does not support direct browser-to-API calls --
  * the request fails with a generic CORS-blocked network error, not a
  * readable HTTP response. Routed through a minimal, stateless same-origin
- * proxy (app/api/openai-proxy/route.ts) instead: it forwards the caller-
- * supplied key in the Authorization header on every request and persists
- * nothing. Set NEXT_PUBLIC_OPENAI_API_BASE to override (e.g. back to
- * "https://api.openai.com/v1" directly, if OpenAI ever adds proper browser
- * CORS support) -- the adapter logic itself doesn't change either way.
+ * proxy (app/api/openai-proxy/route.ts) in the browser instead: it forwards
+ * the caller-supplied key in the Authorization header on every request and
+ * persists nothing.
+ *
+ * CORS is a browser-enforced restriction only -- it doesn't apply to a
+ * Node.js `fetch()` call (e.g. scripts/runCalibration.ts), and a relative
+ * URL like "/api/openai-proxy" has no origin to resolve against outside a
+ * browser, so it throws "Failed to parse URL" if used there (caught by
+ * actually running the calibration script for real, not assumed). The
+ * default below picks the right base for whichever context is running:
+ * same-origin proxy in the browser, OpenAI's real endpoint directly
+ * everywhere else. NEXT_PUBLIC_OPENAI_API_BASE still overrides either way.
  */
-const OPENAI_API_BASE = process.env.NEXT_PUBLIC_OPENAI_API_BASE ?? "/api/openai-proxy";
+const isBrowser = typeof window !== "undefined";
+const OPENAI_API_BASE =
+  process.env.NEXT_PUBLIC_OPENAI_API_BASE ??
+  (isBrowser ? "/api/openai-proxy" : "https://api.openai.com/v1/chat/completions");
 
 export const openaiAdapter: JudgeAdapter = {
   provider: "openai",
