@@ -1,4 +1,5 @@
-import type { JudgeAdapter, JudgeVerdict, Rubric, SectionedAnswer } from "./types";
+import type { Answer, JudgeAdapter, JudgeVerdict, Rubric } from "./types";
+import { SECTION_KEYS_BY_FORMAT } from "./types";
 import { buildJudgePrompt } from "./prompt";
 import { normalizeLevel, normalizeOverallFeedback, normalizeSections } from "./parseVerdict";
 
@@ -46,9 +47,8 @@ async function callAnthropic(
 export const anthropicAdapter: JudgeAdapter = {
   provider: "anthropic",
 
-  async judge(rubric: Rubric, answer: SectionedAnswer, apiKey: string): Promise<JudgeVerdict> {
-    const { system, user } = buildJudgePrompt(rubric, answer);
-    const imageUrl = answer.high_level_design_image_url;
+  async judge(rubric: Rubric, answer: Answer, apiKey: string): Promise<JudgeVerdict> {
+    const { system, user, imageUrl } = buildJudgePrompt(rubric, answer);
 
     let response = await callAnthropic(system, user, imageUrl, apiKey);
     let imageUsed = Boolean(imageUrl);
@@ -73,7 +73,7 @@ export const anthropicAdapter: JudgeAdapter = {
       provider: "anthropic",
       assessed_level: normalizeLevel(parsed),
       overall_feedback: normalizeOverallFeedback(parsed),
-      sections: normalizeSections(parsed),
+      sections: normalizeSections(parsed, SECTION_KEYS_BY_FORMAT[rubric.format]),
       image_used_as_vision_input: imageUrl ? imageUsed : undefined,
       prompt_tokens: data.usage?.input_tokens ?? 0,
       completion_tokens: data.usage?.output_tokens ?? 0,

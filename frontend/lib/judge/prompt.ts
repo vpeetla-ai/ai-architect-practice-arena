@@ -1,4 +1,20 @@
-import type { Rubric, SectionedAnswer } from "./types";
+import type {
+  Answer,
+  BehavioralAnswer,
+  BehavioralRubric,
+  Rubric,
+  SectionedAnswer,
+  TradeoffAnswer,
+  TradeoffRubric,
+} from "./types";
+
+interface PromptResult {
+  system: string;
+  user: string;
+  /** Only ever set for system_design -- the other two formats have no
+   * diagram/image concept. */
+  imageUrl?: string;
+}
 
 /**
  * Builds the grading prompt directly from the rubric's real section text
@@ -6,9 +22,24 @@ import type { Rubric, SectionedAnswer } from "./types";
  * scripts/build_rubrics.py) rather than a paraphrased summary -- this is
  * what keeps the judge grounded in the same bar the playbook itself
  * defines, instead of drifting toward the judge model's own generic idea
- * of a good answer.
+ * of a good answer. Branches per rubric.format; the three builders below
+ * share one JSON-response contract shape so parseVerdict.ts needs only one
+ * normalizer, generalized over whichever section keys the format declares.
  */
-export function buildJudgePrompt(rubric: Rubric, answer: SectionedAnswer): { system: string; user: string } {
+export function buildJudgePrompt(rubric: Rubric, answer: Answer): PromptResult {
+  if (rubric.format === "system_design") {
+    return buildSystemDesignPrompt(rubric, answer as SectionedAnswer);
+  }
+  if (rubric.format === "behavioral") {
+    return buildBehavioralPrompt(rubric, answer as BehavioralAnswer);
+  }
+  return buildTradeoffPrompt(rubric, answer as TradeoffAnswer);
+}
+
+function buildSystemDesignPrompt(
+  rubric: Extract<Rubric, { format: "system_design" }>,
+  answer: SectionedAnswer,
+): PromptResult {
   const system = `You are grading a candidate's answer to a Staff+/Principal-level AI Architect system-design interview question, against a specific, predefined rubric. Grade STRICTLY against the rubric text below -- do not substitute your own general opinion of what a good answer looks like.
 
 Question: ${rubric.title}
@@ -77,6 +108,114 @@ ${answer.high_level_design_mermaid ? `\nDiagram (Mermaid source):\n\`\`\`mermaid
 
 ## Deep dives
 ${answer.deep_dives || "(left blank)"}`;
+
+  return { system, user, imageUrl: answer.high_level_design_image_url };
+}
+
+function buildBehavioralPrompt(rubric: BehavioralRubric, answer: BehavioralAnswer): PromptResult {
+  const system = `You are grading a candidate's answer to a Staff+/Principal-level AI Architect BEHAVIORAL interview question, using the STAR method (Situation, Task, Action, Result) plus a likely follow-up question.
+
+Generic interview question posed to the candidate: "${rubric.generic_prompt}"
+
+IMPORTANT: the reference material below is ONE real, illustrative example of someone demonstrating this competency -- it is NOT the assignment, and the candidate is not expected to reference the same company, numbers, or facts. Grade whether the candidate's own real story demonstrates the SAME underlying competency and depth, not whether it matches these specific details.
+
+Illustrative reference example:
+## Situation
+${rubric.situation_summary}
+## Task
+${rubric.task_summary}
+## Action (the depth a strong answer's action section shows)
+${rubric.action_summary}
+## Result (the depth a strong answer's result section shows)
+${rubric.result_summary}
+
+Likely follow-up question: "${rubric.follow_up_question}"
+Reference answer to that follow-up (depth to calibrate against, not facts to match):
+${rubric.follow_up_model_answer}
+
+## Level criteria -- what distinguishes Mid/Senior/Staff+/Principal:
+- Mid-level: ${rubric.level_criteria.mid}
+- Senior: ${rubric.level_criteria.senior}
+- Staff+: ${rubric.level_criteria.staff_plus}
+- Principal: ${rubric.level_criteria.principal}
+
+Assess ONE overall level for the whole answer, based on which level's specific criteria it actually demonstrates in the candidate's OWN story -- not tone, length, or confidence. Classify at the HIGHEST level whose criteria are clearly satisfied.
+
+Additionally, grade EACH of five sections (Situation, Task, Action, Result, Follow-up Response) separately: for each, list specific strengths and specific improvements -- concrete and actionable, not generic praise or criticism. A section left blank should be flagged plainly as missing, not skipped.
+
+Respond with ONLY valid JSON matching this exact shape, no markdown fences, no commentary:
+{
+  "assessed_level": "mid" | "senior" | "staff_plus" | "principal",
+  "overall_feedback": "2-4 sentences summarizing the answer as a whole",
+  "sections": {
+    "situation": { "strengths": string[], "improvements": string[] },
+    "task": { "strengths": string[], "improvements": string[] },
+    "action": { "strengths": string[], "improvements": string[] },
+    "result": { "strengths": string[], "improvements": string[] },
+    "follow_up_response": { "strengths": string[], "improvements": string[] }
+  }
+}`;
+
+  const user = `Candidate's answer:
+
+## Situation
+${answer.situation || "(left blank)"}
+
+## Task
+${answer.task || "(left blank)"}
+
+## Action
+${answer.action || "(left blank)"}
+
+## Result
+${answer.result || "(left blank)"}
+
+## Response to the follow-up question ("${rubric.follow_up_question}")
+${answer.follow_up_response || "(left blank)"}`;
+
+  return { system, user };
+}
+
+function buildTradeoffPrompt(rubric: TradeoffRubric, answer: TradeoffAnswer): PromptResult {
+  const system = `You are grading a candidate's answer to a Staff+/Principal-level AI Architect REASONING-FRAMEWORK interview question -- not a system design, a trade-off argument explained out loud.
+
+Question posed to the candidate: "${rubric.generic_prompt}"
+
+Reference material -- the real framework and supporting evidence this question is grounded in (use this to judge depth and correctness; the candidate does not need to cite the same real systems):
+
+## The framework
+${rubric.framework_summary}
+
+## Supporting evidence and edge cases
+${rubric.supporting_evidence_summary}
+
+## Level criteria -- what distinguishes Mid/Senior/Staff+/Principal:
+- Mid-level: ${rubric.level_criteria.mid}
+- Senior: ${rubric.level_criteria.senior}
+- Staff+: ${rubric.level_criteria.staff_plus}
+- Principal: ${rubric.level_criteria.principal}
+
+Assess ONE overall level based on which level's specific criteria the candidate's reasoning actually demonstrates -- not tone, length, or confidence. Classify at the HIGHEST level whose criteria are clearly satisfied.
+
+Additionally, grade EACH of two sections (Framework, Applied Example) separately: for each, list specific strengths and specific improvements -- concrete and actionable. A section left blank should be flagged plainly as missing, not skipped.
+
+Respond with ONLY valid JSON matching this exact shape, no markdown fences, no commentary:
+{
+  "assessed_level": "mid" | "senior" | "staff_plus" | "principal",
+  "overall_feedback": "2-4 sentences summarizing the answer as a whole",
+  "sections": {
+    "framework": { "strengths": string[], "improvements": string[] },
+    "applied_example": { "strengths": string[], "improvements": string[] }
+  }
+}`;
+
+  const user = `Candidate's answer:
+
+## Framework / reasoning
+${answer.framework || "(left blank)"}
+
+## A concrete example where you've seen this trade-off decided
+${answer.applied_example || "(left blank)"}`;
 
   return { system, user };
 }

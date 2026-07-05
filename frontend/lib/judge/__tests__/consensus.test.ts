@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildConsensus } from "../consensus";
-import type { JudgeVerdict, SectionKey } from "../types";
+import type { JudgeVerdict, SectionFeedback } from "../types";
 
 const EMPTY_SECTIONS = {
   requirements: { strengths: [], improvements: [] },
@@ -8,7 +8,7 @@ const EMPTY_SECTIONS = {
   api_interface: { strengths: [], improvements: [] },
   high_level_design: { strengths: [], improvements: [] },
   deep_dives: { strengths: [], improvements: [] },
-} satisfies Record<SectionKey, { strengths: string[]; improvements: string[] }>;
+} satisfies Record<string, SectionFeedback>;
 
 function verdict(provider: "openai" | "anthropic", assessed_level: JudgeVerdict["assessed_level"]): JudgeVerdict {
   return {

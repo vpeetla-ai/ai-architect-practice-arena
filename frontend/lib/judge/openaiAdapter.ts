@@ -1,4 +1,5 @@
-import type { JudgeAdapter, JudgeVerdict, Rubric, SectionedAnswer } from "./types";
+import type { Answer, JudgeAdapter, JudgeVerdict, Rubric } from "./types";
+import { SECTION_KEYS_BY_FORMAT } from "./types";
 import { buildJudgePrompt } from "./prompt";
 import { normalizeLevel, normalizeOverallFeedback, normalizeSections } from "./parseVerdict";
 
@@ -61,9 +62,8 @@ async function callOpenAI(
 export const openaiAdapter: JudgeAdapter = {
   provider: "openai",
 
-  async judge(rubric: Rubric, answer: SectionedAnswer, apiKey: string): Promise<JudgeVerdict> {
-    const { system, user } = buildJudgePrompt(rubric, answer);
-    const imageUrl = answer.high_level_design_image_url;
+  async judge(rubric: Rubric, answer: Answer, apiKey: string): Promise<JudgeVerdict> {
+    const { system, user, imageUrl } = buildJudgePrompt(rubric, answer);
 
     // Graceful degradation: if an image was provided, try including it as a
     // real vision input first; if that call fails for any reason (provider
@@ -92,7 +92,7 @@ export const openaiAdapter: JudgeAdapter = {
       provider: "openai",
       assessed_level: normalizeLevel(parsed),
       overall_feedback: normalizeOverallFeedback(parsed),
-      sections: normalizeSections(parsed),
+      sections: normalizeSections(parsed, SECTION_KEYS_BY_FORMAT[rubric.format]),
       image_used_as_vision_input: imageUrl ? imageUsed : undefined,
       prompt_tokens: data.usage?.prompt_tokens ?? 0,
       completion_tokens: data.usage?.completion_tokens ?? 0,
