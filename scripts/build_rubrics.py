@@ -6,13 +6,15 @@ time. Rerun this whenever the pinned playbook commit is bumped (see
 PLAYBOOK_COMMIT below); CI fails the build if any question in QUESTION_SLICE
 fails to parse, so a rubric gap is never silently shipped.
 
-Phase 1 scope: only ai-system-design/, general-system-design/, and
-cloud-architecture/ entries are supported — they share one rubric shape (an
-explicit "## What's expected at each level" section naming Mid/Senior/Staff+/
-Principal behavior). behavioral/ and scalability-governance-tradeoffs/ use a
-genuinely different answer shape (STAR narrative; framework-plus-worked-example)
-that needs its own, differently-designed judge rubric — deferred to Phase 2
-rather than force-fit into this parser.
+Phase 2 scope: all 26 entries across ai-system-design/, general-system-design/,
+and cloud-architecture/ are supported — they share one rubric shape (explicit
+"## Core entities", "## API / interface", "## High-level design", numbered
+"## Deep dive N: ..." sections, and a "## What's expected at each level"
+section naming Mid/Senior/Staff+/Principal behavior). behavioral/ and
+scalability-governance-tradeoffs/ use a genuinely different answer shape (STAR
+narrative; framework-plus-worked-example) that needs its own, differently-
+designed judge rubric — deferred to Phase 3 rather than force-fit into this
+parser.
 """
 
 from __future__ import annotations
@@ -26,20 +28,38 @@ from pathlib import Path
 PLAYBOOK_ROOT = Path(__file__).resolve().parent.parent / "content" / "playbook"
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "content" / "rubrics.json"
 
-# The Phase 1 launch slice — 10 questions spanning the 3 folders that share
-# the Mid/Senior/Staff+/Principal rubric shape. See docs/adr/0002 for why
-# these 10 specifically.
+# Phase 2: all 26 questions across the 3 folders that share the
+# Requirements/Core-Entities/API/HLD/Deep-Dives + Mid/Senior/Staff+/Principal
+# rubric shape. behavioral/ and scalability-governance-tradeoffs/ (9 more
+# questions) are STAR- and framework-shaped respectively — deferred to a
+# separate Phase 3 parser rather than force-fit here.
 QUESTION_SLICE: list[str] = [
     "ai-system-design/01-llm-inference-serving-at-scale.md",
     "ai-system-design/02-rag-platform-at-scale.md",
     "ai-system-design/03-agent-tool-use-orchestration-platform.md",
+    "ai-system-design/04-feature-store-finetuning-data-pipeline.md",
+    "ai-system-design/05-content-moderation-safety-system.md",
+    "ai-system-design/06-multimodal-search-recommendation-system.md",
+    "ai-system-design/07-llm-evaluation-observability-platform.md",
+    "ai-system-design/08-finetuning-rlhf-training-pipeline-at-scale.md",
+    "ai-system-design/09-multi-tenant-ai-platform-architecture.md",
     "ai-system-design/10-ai-agent-sandboxing-and-code-execution-security.md",
+    "ai-system-design/11-on-device-edge-ai-inference-architecture.md",
+    "ai-system-design/12-training-data-provenance-and-ip-risk-architecture.md",
     "ai-system-design/13-durable-long-running-agent-execution.md",
-    "general-system-design/02-realtime-chat-messaging-at-scale.md",
-    "general-system-design/04-distributed-job-scheduler-task-queue.md",
+    "cloud-architecture/01-gpu-capacity-planning-and-procurement.md",
+    "cloud-architecture/02-multi-region-strategy-training-vs-serving.md",
+    "cloud-architecture/03-disaster-recovery-for-model-serving.md",
     "cloud-architecture/04-network-architecture-for-distributed-training.md",
     "cloud-architecture/05-security-and-compliance-architecture-for-ai-systems.md",
     "cloud-architecture/06-container-orchestration-and-cost-optimization-at-scale.md",
+    "general-system-design/01-distributed-rate-limiter.md",
+    "general-system-design/02-realtime-chat-messaging-at-scale.md",
+    "general-system-design/03-news-feed-ranking-system.md",
+    "general-system-design/04-distributed-job-scheduler-task-queue.md",
+    "general-system-design/05-distributed-unique-id-generator.md",
+    "general-system-design/06-collaborative-document-editing.md",
+    "general-system-design/07-distributed-cache-cdn-layer.md",
 ]
 
 _LEVEL_KEYS = {
@@ -56,6 +76,11 @@ class Rubric:
     title: str
     category: str
     requirements_summary: str
+    core_entities_summary: str
+    api_interface_summary: str
+    high_level_design_summary: str
+    reference_mermaid: str | None
+    deep_dives_summary: str
     level_criteria: dict[str, str]
     related_deep_dives: list[str]
 
@@ -100,6 +125,22 @@ def _extract_related_links(body: str) -> list[str]:
     return re.findall(r"\[([^\]]+)\]\(([^)]+)\)", related)  # (label, href) pairs kept as label only downstream
 
 
+def _extract_deep_dives(body: str) -> str:
+    """Concatenates every "## Deep dive N: <title>" section's body — the
+    heading count (2-4) and exact title vary per entry, so this matches the
+    numbered-heading *pattern*, not a fixed string."""
+    pattern = r"^## (Deep dive \d+:.*?)\s*\n(.*?)(?=^## |\Z)"
+    matches = re.findall(pattern, body, re.MULTILINE | re.DOTALL)
+    if not matches:
+        raise RubricParseError("no '## Deep dive N: ...' sections found")
+    return "\n\n".join(f"{heading}\n{text.strip()}" for heading, text in matches)
+
+
+def _extract_mermaid(section_body: str) -> str | None:
+    match = re.search(r"```mermaid\s*\n(.*?)```", section_body, re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
 def parse_entry(relative_path: str) -> Rubric:
     full_path = PLAYBOOK_ROOT / relative_path
     if not full_path.exists():
@@ -114,6 +155,24 @@ def parse_entry(relative_path: str) -> Rubric:
     requirements = _extract_section(text, "Requirements")
     if requirements is None:
         raise RubricParseError(f"{relative_path}: no '## Requirements' section found")
+
+    core_entities = _extract_section(text, "Core entities")
+    if core_entities is None:
+        raise RubricParseError(f"{relative_path}: no '## Core entities' section found")
+
+    api_interface = _extract_section(text, "API / interface")
+    if api_interface is None:
+        raise RubricParseError(f"{relative_path}: no '## API / interface' section found")
+
+    high_level_design = _extract_section(text, "High-level design")
+    if high_level_design is None:
+        raise RubricParseError(f"{relative_path}: no '## High-level design' section found")
+    reference_mermaid = _extract_mermaid(high_level_design)
+
+    try:
+        deep_dives = _extract_deep_dives(text)
+    except RubricParseError as exc:
+        raise RubricParseError(f"{relative_path}: {exc}") from exc
 
     level_section = _extract_section(text, "What's expected at each level")
     if level_section is None:
@@ -131,6 +190,11 @@ def parse_entry(relative_path: str) -> Rubric:
         title=title,
         category=category,
         requirements_summary=requirements.strip(),
+        core_entities_summary=core_entities.strip(),
+        api_interface_summary=api_interface.strip(),
+        high_level_design_summary=high_level_design.strip(),
+        reference_mermaid=reference_mermaid,
+        deep_dives_summary=deep_dives,
         level_criteria=level_criteria,
         related_deep_dives=related_labels,
     )

@@ -1,6 +1,6 @@
 from practice_arena.questions import get_rubric, list_questions, load_rubrics
 
-EXPECTED_QUESTION_COUNT = 10
+EXPECTED_QUESTION_COUNT = 26  # Phase 2: all of ai-system-design/, general-system-design/, cloud-architecture/
 
 
 def test_load_rubrics_parses_the_real_launch_slice() -> None:
@@ -13,6 +13,16 @@ def test_every_rubric_has_all_four_levels() -> None:
         assert set(rubric["level_criteria"].keys()) == {"mid", "senior", "staff_plus", "principal"}
         for level, text in rubric["level_criteria"].items():
             assert text.strip(), f"{rubric['question_id']}: empty criteria text for level '{level}'"
+
+
+def test_every_rubric_has_the_new_sectioned_fields() -> None:
+    for rubric in load_rubrics():
+        assert rubric["core_entities_summary"].strip(), f"{rubric['question_id']}: empty core_entities_summary"
+        assert rubric["api_interface_summary"].strip(), f"{rubric['question_id']}: empty api_interface_summary"
+        assert rubric["high_level_design_summary"].strip(), f"{rubric['question_id']}: empty high_level_design_summary"
+        assert rubric["reference_mermaid"], f"{rubric['question_id']}: no mermaid diagram extracted"
+        assert rubric["deep_dives_summary"].strip(), f"{rubric['question_id']}: empty deep_dives_summary"
+        assert "Deep dive " in rubric["deep_dives_summary"], f"{rubric['question_id']}: deep_dives_summary missing headings"
 
 
 def test_list_questions_omits_level_criteria() -> None:
