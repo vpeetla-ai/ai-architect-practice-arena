@@ -3,6 +3,9 @@
 [![ci](https://github.com/vpeetla-ai/ai-architect-practice-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/vpeetla-ai/ai-architect-practice-arena/actions/workflows/ci.yml)
 [![Org](https://img.shields.io/badge/GitHub-vpeetla--ai-blue)](https://github.com/vpeetla-ai)
 
+**Live:** [ai-architect-practice-arena.vercel.app](https://ai-architect-practice-arena.vercel.app)
+(API: [practice-arena-api.onrender.com](https://practice-arena-api.onrender.com))
+
 A mock-interview practice layer for [ai-architect-interview-playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook):
 write a real answer to one of its 35 questions, and get graded by **both OpenAI and Anthropic**
 against that entry's own real Staff+/Principal rubric — using your own API key, which is never
@@ -29,7 +32,7 @@ direct browser calls; a minimal stateless proxy fixes it without ever storing a 
 | Frontend (`frontend/`) | ✅ Real, tested — verified end-to-end in a real browser against both live provider APIs (with placeholder keys) |
 | Judge calibration (`content/calibration/`) | ✅ Run against live providers, **40/40 passed** — see [docs/adr/0001](docs/adr/0001-byok-judge-architecture.md) (a real bug was found and fixed on the first run: OpenAI's adapter broke outside a browser context) |
 | Coverage | 10 of 35 playbook questions (the 3 folders sharing one rubric shape); `behavioral/` and `scalability-governance-tradeoffs/` need a different rubric design |
-| Deployment | Not yet deployed — verified locally only so far |
+| Deployment | ✅ Live — frontend on Vercel, backend on Render (free tiers), verified end-to-end against the real deployed URLs, including the OpenAI proxy route responding correctly in Vercel's serverless environment |
 
 ## Architecture
 

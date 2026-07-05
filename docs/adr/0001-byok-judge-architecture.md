@@ -105,6 +105,29 @@ questions in the Phase 1 slice, using real API keys against the real OpenAI (`gp
 Anthropic (`claude-sonnet-4-5`) APIs. This is the pre-launch calibration gate, cleared — the
 judge harness demonstrably grades in the expected direction, not just "runs without crashing."
 
+## Deployment — live, 2026-07-05
+
+Frontend deployed to Vercel (`ai-architect-practice-arena.vercel.app`), backend deployed to
+Render (`practice-arena-api.onrender.com`), both on free tiers, matching this org's established
+reference-stack convention (ADR-005 in `ai-architecture-portfolio`). Two things caught only by
+deploying for real, not assumed from local testing:
+
+- **Vercel's default Deployment Protection (SSO) blocks all public access**, including
+  production. A new project defaults to gating every URL behind a Vercel-account login wall —
+  exactly the wrong default for a tool meant for public use. Disabled explicitly
+  (`vercel project protection disable ... --sso`) and confirmed via a real unauthenticated
+  request that the site is actually reachable.
+- **`vercel link` without an explicit `--project` flag creates a new project** rather than
+  linking to an existing one of a different name — caught after a rename left an empty duplicate
+  project behind, cleaned up before it caused confusion later.
+
+Verified live afterward: the backend's `/health`, `/questions`, and `/questions/{id}/rubric`
+endpoints all respond correctly over real HTTPS; the frontend's home and practice pages render
+real content sourced from the live backend (not a cached or local fallback); and the
+`/api/openai-proxy` serverless function was confirmed working in Vercel's actual production
+runtime — a direct request with a placeholder key reached OpenAI's real API and returned OpenAI's
+real, correctly-parsed error text, the same behavior already verified locally.
+
 ## Consequences
 
 ### Positive
