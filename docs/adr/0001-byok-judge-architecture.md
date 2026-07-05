@@ -128,6 +128,71 @@ real content sourced from the live backend (not a cached or local fallback); and
 runtime — a direct request with a placeholder key reached OpenAI's real API and returned OpenAI's
 real, correctly-parsed error text, the same behavior already verified locally.
 
+## Phase 2 — sectioned mock interview, full system-design coverage, 2026-07-05
+
+Phase 1 treated an answer as one flat textarea and covered 10 of the playbook's questions. Asked
+for the real, proper mock-interview experience, this phase (a) breaks the answer into the same
+five sections the playbook itself uses (Requirements, Core Entities, API/Interface, High-Level
+Design, Deep Dives), (b) extends coverage to all 26 questions in the three folders that share
+this shape (`ai-system-design/` 13, `general-system-design/` 7, `cloud-architecture/` 6) — the
+remaining 9 (`behavioral/` 5, `scalability-governance-tradeoffs/` 4) are still deliberately
+deferred, being STAR- and framework-shaped rather than system-design-shaped, and (c) gives each
+judge a High-Level Design input that accepts a live-rendered Mermaid diagram (the primary path —
+rendered client-side via the `mermaid` package, sent to judges as raw text since it's already
+structured) plus an optional image URL (Excalidraw exports, screenshots — shown inline, sent as a
+real vision input when the provider accepts it, with a text-only fallback if it doesn't).
+
+**Parser extension**: `scripts/build_rubrics.py` now extracts `core_entities_summary`,
+`api_interface_summary`, `high_level_design_summary`, `reference_mermaid` (the model answer's own
+diagram, parsed from its fenced ```mermaid``` block), and `deep_dives_summary` (all `## Deep dive
+N: ...` sections concatenated — count and titles vary 2-4 per entry, matched by heading pattern,
+not a fixed string). Re-run against all 26 questions with zero parse failures — same
+fail-loud-on-any-gap discipline as Phase 1's original 10.
+
+**Judge restructuring**: `JudgeVerdict` still assesses one overall level, but now returns
+per-section `{strengths, improvements}` instead of one flat comment. A new
+`content-consistency.test.ts` cross-checks every rubric has a matching calibration case and vice
+versa, and that every `question_id` resolves to a real file under the playbook submodule — this
+caught the expected (since-fixed) coverage gap mid-rewrite.
+
+**Calibration — run for real against live OpenAI + Anthropic, 104 cases (26 questions × weak/
+strong × 2 providers): 102/104 passed on the first run.** Two real failures, each diagnosed and
+fixed rather than dismissed:
+
+1. `[anthropic] ai-system-design/05-content-moderation-safety-system (strong): expected
+   ~principal, got senior` — a genuine content gap, not a judge-strictness or harness bug. The
+   calibration "strong" answer covered the Staff+ criteria (redaction-vs-grounding trade-off
+   named explicitly, risk categories routed differently) but omitted the specific
+   Principal-differentiating mechanism this rubric entry actually defines: fail-open/fail-closed
+   as a *per-category* design decision (not a global policy), and the human review experience
+   designed as a first-class part of the system, not an implementation detail. **Fixed** by adding
+   both points to that entry's `strong_answer.deep_dives` in `content/calibration/manifest.json`.
+2. `[anthropic] cloud-architecture/05-security-and-compliance-architecture-for-ai-systems (weak):
+   TypeError: fetch failed` — a transient network-level failure, not a content or code defect (it
+   occurred mid-run, on an otherwise unremarkable weak-answer case, with no retry logic in the
+   harness at the time). **Fixed** by adding a single retry to `runCalibration.ts`, scoped to
+   network-level error patterns only (`fetch failed`, `ECONNRESET`, `ETIMEDOUT`) — a real judge
+   error (bad key, 4xx) still surfaces immediately rather than being retried into a false pass.
+
+Both fixes are applied and unit/type-check clean, but **a full live rerun to confirm 104/104
+has not yet happened as of this writing** — BYOK means this repo's own tooling never holds a
+user's API key, so re-confirming requires the user to run `npm run calibrate` again with their
+own keys. This is disclosed here rather than assumed resolved.
+
+**Image-vision-input path: still genuinely unverified.** Neither the original 10-question nor the
+new 16-question calibration cases exercise `high_level_design_image_url` (calibration answers use
+the Mermaid path only), so the vision-input code path in `openaiAdapter.ts`/`anthropicAdapter.ts`
+— including the "NEEDS LIVE VERIFICATION" Anthropic URL-source question flagged in Phase 1 — has
+not been exercised against a live provider with a real image. It only got a real (non-provider)
+browser check: the image URL field renders an inline `<img>` preview correctly. Whether the
+providers actually accept it as a vision input, or silently fall back to text-only, remains
+unconfirmed pending a real answer submission with an image URL against live providers.
+
+Local browser verification before redeploying (2026-07-05): all 26 questions load with real
+section content from the backend; the Mermaid textarea renders a real SVG via `mermaid.render()`
+on typed input; the image-URL field renders a real inline preview; no console errors; the
+"Grade my answer" button correctly stays disabled with no answer text and no keys entered.
+
 ## Consequences
 
 ### Positive
@@ -137,19 +202,22 @@ real, correctly-parsed error text, the same behavior already verified locally.
   away — a Staff+ answer that only one judge recognizes as such is more informative than a
   single blended score.
 - The rubric is guaranteed to match the playbook's own text, since it's parsed, not re-authored.
+- All 26 system-design-shaped questions now share one sectioned mock-interview experience with
+  per-section feedback, not just a flat level and comment.
 
 ### Negative
 - The OpenAI proxy is a real, if minimal, server-side component — it's the one place a user's
   key transits infrastructure we operate, even though nothing is stored. This asymmetry between
   providers is disclosed plainly in the UI's key-handling notice.
-- Only 10 of the playbook's 35 questions are covered in Phase 1; the other 25 (11 remaining
-  `ai-system-design/` entries, 4 `general-system-design/`, 3 `cloud-architecture/`, all of
-  `behavioral/` and `scalability-governance-tradeoffs/`) need either the same rubric parser
-  extended, or — for the STAR/framework folders — a genuinely different rubric design.
-- Calibration (40/40, see above) only covers one weak and one strong answer per question — real
-  answers in practice will span a much wider range of quality and style than these two
-  deliberately clear-cut reference points, so this is evidence the harness works in the direction
-  intended, not proof it's accurate across the full spectrum of real, messier answers.
+- 9 of the playbook's 35 questions (`behavioral/` 5, `scalability-governance-tradeoffs/` 4) are
+  still not covered — genuinely STAR- and framework-shaped, deferred to a Phase 3 with its own,
+  not-yet-designed rubric and UI rather than force-fit into these five sections.
+- Calibration only covers one weak and one strong answer per question; real answers in practice
+  will span a much wider range of quality and style than these two deliberately clear-cut
+  reference points, so this is evidence the harness works in the direction intended, not proof
+  it's accurate across the full spectrum of real, messier answers.
+- The image-vision-input path is implemented with a graceful text-only fallback but has no live
+  confirmation yet that either provider actually accepts it as a real visual input, as noted above.
 
 ## References
 - [ai-architect-interview-playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook) — the rubric source of truth

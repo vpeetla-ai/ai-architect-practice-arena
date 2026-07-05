@@ -53,6 +53,11 @@ function withinOneStep(assessed: Level, expected: Level): boolean {
   return Math.abs(LEVEL_ORDER.indexOf(assessed) - LEVEL_ORDER.indexOf(expected)) <= 1;
 }
 
+// A single retry on a transient network-level failure (e.g. "fetch failed")
+// -- not on a real judge error like a malformed API key or a 4xx from the
+// provider, which a retry won't fix and which should surface immediately.
+const RETRYABLE_ERROR_PATTERN = /fetch failed|ECONNRESET|ETIMEDOUT|network/i;
+
 async function runAdapterAgainstCase(
   adapter: JudgeAdapter,
   rubric: Rubric,
@@ -60,17 +65,26 @@ async function runAdapterAgainstCase(
   expected: Level,
   apiKey: string,
 ): Promise<{ pass: boolean; assessed: Level | "ERROR"; detail: string }> {
-  try {
-    const verdict = await adapter.judge(rubric, answer, apiKey);
-    const pass = withinOneStep(verdict.assessed_level, expected);
-    return {
-      pass,
-      assessed: verdict.assessed_level,
-      detail: pass ? "ok" : `expected ~${expected}, got ${verdict.assessed_level}`,
-    };
-  } catch (err) {
-    return { pass: false, assessed: "ERROR", detail: String(err) };
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const verdict = await adapter.judge(rubric, answer, apiKey);
+      const pass = withinOneStep(verdict.assessed_level, expected);
+      return {
+        pass,
+        assessed: verdict.assessed_level,
+        detail: pass ? "ok" : `expected ~${expected}, got ${verdict.assessed_level}`,
+      };
+    } catch (err) {
+      const message = String(err);
+      if (attempt === 1 && RETRYABLE_ERROR_PATTERN.test(message)) {
+        console.log(`  (retrying [${adapter.provider}] ${rubric.question_id} after transient error: ${message})`);
+        continue;
+      }
+      return { pass: false, assessed: "ERROR", detail: message };
+    }
   }
+  // Unreachable -- the loop always returns on its second iteration.
+  throw new Error("unreachable");
 }
 
 async function main() {
