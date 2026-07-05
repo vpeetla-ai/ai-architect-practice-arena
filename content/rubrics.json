@@ -1,0 +1,172 @@
+[
+  {
+    "question_id": "ai-system-design/01-llm-inference-serving-at-scale",
+    "title": "Design an LLM inference serving platform at scale",
+    "category": "ai-system-design",
+    "requirements_summary": "**Functional**\n- Users should be able to send a prompt and receive a generated completion, streamed\n  token-by-token.\n- Support multiple model sizes/variants behind one API (e.g., a fast/cheap model and a\n  slower/higher-quality model).\n- Support both interactive (chat, low-latency) and batch (offline, throughput-optimized)\n  workloads.\n\n**Non-functional**\n- Low time-to-first-token (TTFT) for interactive traffic \u2014 target under ~200ms P50.\n- High aggregate throughput (tokens/sec across the fleet) without starving individual requests.\n- GPU memory is the scarcest resource \u2014 a 70B-parameter model's KV cache alone can exceed the\n  weights' own memory footprint at long context lengths and high concurrency.\n- Graceful degradation under load \u2014 reject or queue, don't silently degrade quality or crash.",
+    "level_criteria": {
+      "mid": "proposes a request queue + a pool of model replicas behind a load balancer; may not spontaneously bring up KV cache memory pressure without prompting.",
+      "senior": "identifies continuous batching over static batching unprompted; can explain why KV cache, not weights, is often the binding memory constraint at high concurrency.",
+      "staff_plus": "derives real numbers (KV bytes per token, memory budget vs. concurrent sequences), designs the preemption/swap policy explicitly, and separates interactive vs. batch scheduling with a stated fairness mechanism \u2014 not just \"add priorities.\"",
+      "principal": "additionally reasons about the cost model (GPU-hours per token per tier) as a design input from the start, and can name the trade-off between serving cost and quality (larger model vs. smaller model + speculative decoding, quantization vs. accuracy loss) with concrete numbers, not just \"it depends.\""
+    },
+    "related_deep_dives": [
+      "vllm-architecture-lab",
+      "agent-finops",
+      "scalability-governance-tradeoffs/01: Cost vs. latency vs. safety"
+    ]
+  },
+  {
+    "question_id": "ai-system-design/02-rag-platform-at-scale",
+    "title": "Design a retrieval-augmented generation (RAG) platform at scale",
+    "category": "ai-system-design",
+    "requirements_summary": "**Functional**\n- Ingest documents from heterogeneous sources (uploads, crawlers, internal wikis).\n- Answer natural-language queries with a grounded, cited response.\n- Respect document-level access control \u2014 a user must never see content, or a citation to\n  content, they aren't authorized to read.\n\n**Non-functional**\n- Billions of chunks indexed; sub-second retrieval latency (P99 under ~300ms for retrieval\n  alone, leaving budget for generation).\n- Freshness: newly ingested documents queryable within minutes, not hours.\n- Grounding correctness matters more than raw retrieval recall \u2014 a wrong-but-confident answer\n  is worse than a slow correct one.",
+    "level_criteria": {
+      "mid": "proposes retrieval \u2192 generation with citations; may not raise access control as a first-class concern until prompted.",
+      "senior": "identifies hybrid retrieval + reranking as the standard two-stage pattern; proposes some access filtering.",
+      "staff_plus": "gets the access-control *ordering* right unprompted (before ranking, not after) and can explain precisely why after-the-fact redaction is insufficient.",
+      "principal": "additionally interrogates the trust chain behind the ordering \u2014 is the identity being filtered by actually verified, not just asserted \u2014 and treats ingestion data quality as a first-class design concern, not an implementation detail."
+    },
+    "related_deep_dives": [
+      "enterprise_rag_platform",
+      "ADR-002: Authorization before ranking",
+      "ADR-0005/ADR-016: Ingestion data contract + lineage"
+    ]
+  },
+  {
+    "question_id": "ai-system-design/03-agent-tool-use-orchestration-platform",
+    "title": "Design an agent orchestration platform with real tool use",
+    "category": "ai-system-design",
+    "requirements_summary": "**Functional**\n- An agent should be able to decompose a user request, call one or more tools/APIs, and\n  synthesize a final response.\n- Side-effecting actions (anything beyond read-only generation) need to be gated, not\n  auto-executed.\n- The system should support multiple specialist agents, each with a narrower tool surface, not\n  one agent with access to everything.\n\n**Non-functional**\n- Every side-effecting action must be auditable after the fact \u2014 who/what triggered it, under\n  what policy decision.\n- A single misbehaving agent or tool call must not be able to take down the whole platform or\n  bypass policy.\n- New tools/agents should be addable without redeploying the whole orchestration layer.",
+    "level_criteria": {
+      "mid": "proposes an orchestrator that routes to specialist agents and calls tools directly.",
+      "senior": "separates read-only generation from side-effecting actions and proposes some approval gate for the latter.",
+      "staff_plus": "designs orchestration and governance as genuinely separate systems, names the fail-open/fail-closed trade-off for the policy engine explicitly, and can explain why a shared gateway beats per-agent inline checks.",
+      "principal": "additionally treats the platform's own protocol surface (MCP/A2A exposure) as a governed extension of the same core rather than a bolt-on, and designs containment for both behavioral and financial failure modes independently."
+    },
+    "related_deep_dives": [
+      "ADR-001: Orchestration vs governance split",
+      "ADR-0005: MCP tool exposure",
+      "ADR-013: Bidirectional MCP + real A2A discovery",
+      "scalability-governance-tradeoffs/03: Centralize vs. federate governance"
+    ]
+  },
+  {
+    "question_id": "ai-system-design/10-ai-agent-sandboxing-and-code-execution-security",
+    "title": "Design a sandboxing architecture for AI agent code execution",
+    "category": "ai-system-design",
+    "requirements_summary": "**Functional**\n- An agent should be able to execute arbitrary code (write and run a script, use a shell, browse\n  a file system) to accomplish a task, without a human manually reviewing every command first.\n- The agent should be able to use external tools (web browsing, file access, API calls) as part\n  of accomplishing a task, with the results fed back into its reasoning loop.\n\n**Non-functional**\n- Code execution must be isolated from the host system \u2014 no ability to escape the sandbox to\n  read/modify anything outside an explicitly allowed scope, even if the executed code is\n  adversarial.\n- The system must defend against **prompt injection**: an instruction embedded in tool output,\n  a fetched web page, or a file's contents, that attempts to hijack the agent's next action \u2014\n  this is a fundamentally different threat than validating direct user input, because the\n  attacker's instruction arrives disguised as data the agent is supposed to process.\n- Network and filesystem access should be allow-listed, not blocked-listed \u2014 an agent sandbox\n  should default to no access, with specific resources explicitly granted, not \"block known-bad\n  destinations.\"",
+    "level_criteria": {
+      "mid": "proposes running agent code in \"a sandbox\" or \"a container\" without naming a specific isolation technology or its trade-offs.",
+      "senior": "names a real isolation approach (gVisor, microVM, seccomp) and can explain the isolation-strength-vs-overhead trade-off between them.",
+      "staff_plus": "identifies prompt injection as a distinct threat model from traditional sandbox escape, and designs tool results to be treated as untrusted input flowing back into the agent, not just tool calls as the only thing requiring policy checks.",
+      "principal": "additionally articulates the core design principle explicitly \u2014 the sandbox's allow-list (or a separate governance gate) must be the enforcement boundary, never the agent's own reasoning, because a successful prompt injection means the agent's judgment is exactly what has been compromised."
+    },
+    "related_deep_dives": [
+      "aegisai-enterprise-agent-platform",
+      "system-design/03: Agent/tool-use orchestration platform",
+      "system-design/05: Content moderation & safety system"
+    ]
+  },
+  {
+    "question_id": "ai-system-design/13-durable-long-running-agent-execution",
+    "title": "Design durable execution for long-running AI agents",
+    "category": "ai-system-design",
+    "requirements_summary": "**Functional**\n- An agent working on a long-horizon task (e.g., a multi-hour research task, a multi-step coding\n  task) needs to survive a process restart, a deployment, or a worker crash mid-task without\n  losing its reasoning progress or repeating already-completed work.\n- Support human-in-the-loop checkpoints that can pause an agent's execution for an\n  indeterminate amount of time (hours to days, not seconds) waiting on human input, then resume\n  exactly where it left off.\n- Support cancellation and inspection of an in-progress long-running task \u2014 a human should be\n  able to see what an agent has done so far and stop it, not just wait for a final result.\n\n**Non-functional**\n- Every external side effect (an API call, a file write, a message sent) an agent takes during a\n  long-running task must not be repeated on resume \u2014 a naive \"replay the whole reasoning trace\n  from the start\" approach would re-execute every tool call, including ones with real\n  consequences.\n- Resuming after a restart should not require the agent to re-derive its own state from scratch\n  (e.g., by re-reading everything it's already processed) \u2014 that's both slow and, for\n  sufficiently long tasks, potentially non-deterministic if the underlying data has changed.\n- Checkpointing itself must be cheap and frequent enough that a crash never loses more than a\n  small, bounded amount of progress.",
+    "level_criteria": {
+      "mid": "proposes storing conversation history in a database for resume, without addressing side-effect idempotency or the cost of re-running reasoning steps.",
+      "senior": "identifies the need for periodic checkpointing and idempotency keys on side effects, at a coarse (e.g., per-task-stage) granularity.",
+      "staff_plus": "designs the durable-execution pattern explicitly \u2014 checkpoint via a side-effect log checked before every consequential action, not a single frozen-state blob \u2014 and treats human-input pauses as fully resource-free durable states.",
+      "principal": "additionally connects this to observability requirements for in-progress tasks (queryable mid-flight, not just post-completion) and can name the real trade-off between coarse checkpointing (simpler, bounded progress loss) and full durable-execution replay (near-zero loss, more implementation complexity) against a stated task-criticality bar."
+    },
+    "related_deep_dives": [
+      "ai-system-design/03: Agent/tool-use orchestration platform",
+      "ai-system-design/07: LLM evaluation and observability platform",
+      "ai-content-factory"
+    ]
+  },
+  {
+    "question_id": "general-system-design/02-realtime-chat-messaging-at-scale",
+    "title": "Design a real-time chat/messaging system at scale",
+    "category": "general-system-design",
+    "requirements_summary": "**Functional**\n- Users can send/receive messages 1:1 and in groups, with delivery working even when the\n  recipient is briefly offline.\n- Message delivery status (sent, delivered, read) should be trackable and shown to the sender.\n- Users should see whether their contacts are currently online (presence).\n\n**Non-functional**\n- Low latency for message delivery when both parties are online \u2014 this is a real-time system,\n  not an eventually-consistent one.\n- At-least-once delivery, with the client responsible for deduplication via message IDs \u2014 never\n  silently drop a message, even under server failure.\n- Must scale to a connection count in the hundreds of millions concurrently \u2014 this is\n  fundamentally a long-lived-connection-management problem, not just a database-throughput\n  problem.",
+    "level_criteria": {
+      "mid": "proposes a database-backed message store with polling or basic pub/sub, without addressing connection-count scaling or ordering guarantees.",
+      "senior": "identifies long-lived connections (WebSocket) as the right transport and designs a routing layer for cross-server message delivery.",
+      "staff_plus": "designs the offline/ordered-queue mechanism explicitly (per-recipient sequence numbers, gap-free reconnect sync) and states the at-least-once-plus-client-dedup delivery model rather than chasing exactly-once at the server.",
+      "principal": "additionally reasons about connection-count as the actual first-order scaling bottleneck (not database throughput), and can discuss why a connection-optimized runtime model (like WhatsApp's real, published Erlang/BEAM choice) matters more at this scale than typical web-service scaling levers."
+    },
+    "related_deep_dives": [
+      "general-system-design/03: News feed / ranking system",
+      "general-system-design/07: Distributed cache / CDN layer"
+    ]
+  },
+  {
+    "question_id": "general-system-design/04-distributed-job-scheduler-task-queue",
+    "title": "Design a distributed job scheduler / task queue",
+    "category": "general-system-design",
+    "requirements_summary": "**Functional**\n- Schedule jobs to run at a specific time or on a recurring interval (cron-style), across a\n  fleet of worker machines.\n- Guarantee a scheduled job runs \u2014 and, critically, runs **exactly once** even if the scheduler\n  or a worker fails mid-execution, not zero times (silently dropped) or multiple times\n  (duplicated side effects).\n- Support job priorities and retries with backoff for jobs that fail.\n\n**Non-functional**\n- The scheduler itself must not be a single point of failure \u2014 a scheduler crash shouldn't mean\n  no jobs run until it's manually restarted.\n- Jobs need to be idempotent-safe or the system needs deduplication, since distributed systems\n  generally can't guarantee exactly-once execution without one of these.\n- Scale to a very large number of scheduled jobs (Google's real cron service handles this at\n  enormous internal scale) without the scheduling decision itself becoming a bottleneck.",
+    "level_criteria": {
+      "mid": "proposes a single scheduler process with a jobs database, without addressing scheduler failover or exactly-once semantics.",
+      "senior": "identifies the need for scheduler redundancy and a lease-based worker assignment mechanism to handle worker failures.",
+      "staff_plus": "explicitly names exactly-once execution as unachievable without idempotency, and designs the at-least-once-plus-idempotent-or-dedup pattern rather than claiming the scheduler alone solves it.",
+      "principal": "additionally designs the scheduler's own high-availability mechanism (leader election via consensus) explicitly, connecting it to the same split-brain-avoidance principle that makes distributed consensus hard in general, not just asserting \"run multiple instances.\""
+    },
+    "related_deep_dives": [
+      "general-system-design/01: Distributed rate limiter",
+      "cloud-architecture/03: Disaster recovery for model serving"
+    ]
+  },
+  {
+    "question_id": "cloud-architecture/04-network-architecture-for-distributed-training",
+    "title": "Design the network architecture for distributed training",
+    "category": "cloud-architecture",
+    "requirements_summary": "**Functional**\n- GPUs across many nodes need to exchange gradients (all-reduce) and activations\n  (all-to-all, for pipeline/tensor parallelism) every training step, at the speed the compute\n  itself produces new data \u2014 network speed, not compute speed, is often the actual bottleneck at\n  scale.\n- The scheduler placing training jobs onto physical GPUs needs to be topology-aware \u2014 which\n  GPUs share a rack, a switch, or a data-center \"AI zone\" \u2014 because communication cost is not\n  uniform across the cluster.\n\n**Non-functional**\n- Bisection bandwidth (the worst-case bandwidth between any two halves of the cluster) is the\n  real capacity metric, not aggregate bandwidth \u2014 a network that's fast in aggregate but poorly\n  connected between specific rack pairs will bottleneck exactly the collective operations\n  training depends on.\n- Failure tolerance matters differently here than in typical enterprise networking: a single\n  slow or flaky link can silently degrade an entire multi-day training run's throughput (a\n  straggler problem) rather than causing a clean failure \u2014 this is a materially different\n  failure mode than a web service's request timeout.",
+    "level_criteria": {
+      "mid": "proposes \"use a fast network\" without identifying collective operations as synchronous barriers or explaining why that makes worst-case (not average) latency the binding constraint.",
+      "senior": "identifies RDMA/RoCE or InfiniBand as the relevant technology choice and can explain the latency/throughput/cost trade-off between them.",
+      "staff_plus": "designs topology-aware placement explicitly \u2014 co-locating tightly-coupled ranks (tensor-parallel) within a rack, allowing loosely-coupled ranks (data-parallel) to spread further \u2014 and connects this to which parallelism strategy generates which communication pattern.",
+      "principal": "additionally identifies the straggler problem (a degraded, not failed, link silently slowing an entire job) as a distinct failure mode requiring per-link health monitoring and automated node exclusion \u2014 not just \"make the network fast and reliable\" as an assumption."
+    },
+    "related_deep_dives": [
+      "system-design/01: LLM inference serving at scale",
+      "cloud-architecture/01: GPU capacity planning and procurement",
+      "vllm-architecture-lab"
+    ]
+  },
+  {
+    "question_id": "cloud-architecture/05-security-and-compliance-architecture-for-ai-systems",
+    "title": "Design the security and compliance architecture for an AI system",
+    "category": "cloud-architecture",
+    "requirements_summary": "**Functional**\n- Model weights need protection against both external exfiltration and insider misuse \u2014\n  distinct from, and in addition to, standard application security (auth, input validation).\n- Training and fine-tuning data subject to residency/compliance rules (GDPR, HIPAA, sector-\n  specific regulation) need enforcement that survives the full pipeline \u2014 ingestion, training,\n  and any logging/tracing along the way, not just at the API boundary.\n- Secrets (API keys for public-facing endpoints, database credentials, model-serving auth\n  tokens) need managed rotation, not static values checked into config.\n\n**Non-functional**\n- The blast radius of a single compromised credential or an insider with broad access should be\n  bounded \u2014 no single actor's access should be sufficient to exfiltrate a full model checkpoint\n  unilaterally.\n- Compliance certifications (SOC 2, HIPAA, FedRAMP) are binary gates for entire market segments\n  (regulated industries, government) \u2014 treat them as hard requirements for those segments, not\n  best-effort goals.",
+    "level_criteria": {
+      "mid": "proposes standard application security (auth, secrets in a vault, encryption) without distinguishing model weights as requiring a categorically different control.",
+      "senior": "identifies model weights as a distinct, high-value asset requiring stricter access control than standard application secrets.",
+      "staff_plus": "designs multi-party authorization specifically for weight access (not just a stricter single-approver flow), and understands secret rotation's real operational gaps (e.g., a managed secret store's \"latest version\" not auto-propagating to already-running compute).",
+      "principal": "additionally reasons about compliance certifications as market-access decisions with real engineering cost (specific controls a cert requires, not general hardening) and can prioritize which certifications unlock which customer segments, trading off against the engineering investment each requires."
+    },
+    "related_deep_dives": [
+      "ADR-015: Genuine hands-on AWS + GCP infra",
+      "behavioral/03: Org-wide security hardening",
+      "system-design/05: Content moderation & safety system"
+    ]
+  },
+  {
+    "question_id": "cloud-architecture/06-container-orchestration-and-cost-optimization-at-scale",
+    "title": "Design container orchestration and cost optimization for AI workloads",
+    "category": "cloud-architecture",
+    "requirements_summary": "**Functional**\n- Run containerized training and serving workloads with GPU scheduling \u2014 not just CPU/memory\n  bin-packing, but GPU-count and GPU-type-aware placement.\n- Support both long-running serving deployments (steady, low-churn) and bursty, short-lived\n  training/batch jobs (high-churn, needs fast scale-up and scale-down).\n\n**Non-functional**\n- GPU cost dominates the infrastructure bill \u2014 an idle, allocated-but-unused GPU is a much more\n  expensive mistake than an idle CPU core, so utilization/bin-packing efficiency matters more\n  here than in typical container orchestration.\n- Cluster autoscaling needs to react fast enough to avoid queueing training jobs behind slow\n  node provisioning, but not so aggressively that it churns expensive GPU nodes up and down for\n  transient load spikes.",
+    "level_criteria": {
+      "mid": "proposes \"use Kubernetes\" or \"use a managed container service\" without connecting the choice to GPU-specific cost or scheduling implications.",
+      "senior": "identifies that GPU bin-packing is coarser-grained and higher-stakes than CPU bin-packing, and picks an orchestration approach based on workload burstiness (steady serving vs. bursty training).",
+      "staff_plus": "designs the utilization-tracking and rightsizing feedback loop explicitly (idle- allocated-GPU detection, consolidation passes), not just initial placement.",
+      "principal": "additionally reasons about the real operational cost of the surrounding infrastructure (ALB fixed costs, cluster ops overhead) as part of the total cost equation, not just the compute/GPU line item \u2014 and can articulate why a candidate's \"I have cloud infrastructure experience\" claim is unverifiable without evidence of Terraform that was actually applied and torn down, not just written."
+    },
+    "related_deep_dives": [
+      "ADR-015: Genuine hands-on AWS + GCP infra",
+      "agent-finops ADR-0002",
+      "aegisai ADR-0006",
+      "cloud-architecture/01: GPU capacity planning and procurement"
+    ]
+  }
+]

@@ -1,0 +1,11 @@
+node_modules/
+.next/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.local
+*.egg-info/
+.DS_Store

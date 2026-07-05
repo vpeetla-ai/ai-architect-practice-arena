@@ -1,0 +1,3 @@
+[submodule "content/playbook"]
+	path = content/playbook
+	url = https://github.com/vpeetla-ai/ai-architect-interview-playbook.git
