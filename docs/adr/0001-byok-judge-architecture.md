@@ -193,6 +193,27 @@ section content from the backend; the Mermaid textarea renders a real SVG via `m
 on typed input; the image-URL field renders a real inline preview; no console errors; the
 "Grade my answer" button correctly stays disabled with no answer text and no keys entered.
 
+**A real finding from redeploying, not assumed**: `vercel --prod` creates a new production
+deployment and updates the project's default git-based domain, but does **not** automatically
+move a previously-set custom short alias (`ai-architect-practice-arena.vercel.app`) onto the new
+deployment — that alias stayed pinned to the prior build until re-pointed explicitly with
+`vercel alias set <new-deployment-url> ai-architect-practice-arena.vercel.app`. Caught only
+because a real request to the canonical URL after redeploying still served the old, flat Phase 1
+UI; fixed by re-aliasing and confirmed via a fresh request afterward.
+
+**Follow-up UI pass, same day**: the sectioned single-column page was hard to navigate between
+questions and buried the keys/results below a long form. Restructured into a three-pane layout —
+`app/practice/layout.tsx` (new) renders a persistent left sidebar listing all 26 questions
+(grouped by category, active question highlighted via a small client component,
+`lib/QuestionNavLink.tsx`, comparing `usePathname()`), the practice page's center column keeps
+the five answer sections, and a new sticky right rail holds the API key inputs, the "Grade my
+answer" button, and the judge results — so switching questions, entering keys, and reading
+results no longer requires scrolling past a full page of textareas. Verified live in the browser:
+clicking between questions in the sidebar re-renders the center column via Next.js client-side
+navigation (RSC fetch, not a full page reload) while the sidebar and right rail persist; the
+active-question highlight matches the real URL after the async transition completes; the layout
+collapses to a single stacked column below 900px for mobile.
+
 ## Consequences
 
 ### Positive

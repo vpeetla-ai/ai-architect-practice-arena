@@ -127,158 +127,164 @@ export default function PracticePage({ params }: PageProps) {
   );
 
   return (
-    <main>
-      <p>
-        <a href="/">&larr; back to all questions</a>
-      </p>
-      <h1>{rubric.title}</h1>
+    <main className="practice-layout-grid">
+      <div className="practice-main-col">
+        <h1>{rubric.title}</h1>
 
-      <h3>Requirements</h3>
-      <p style={{ whiteSpace: "pre-wrap" }}>{renderInlineMarkdown(rubric.requirements_summary)}</p>
-      <textarea
-        value={answer.requirements}
-        onChange={(e) => updateSection("requirements", e.target.value)}
-        placeholder="Functional and non-functional requirements..."
-      />
-
-      <h3>Core Entities</h3>
-      <textarea
-        value={answer.core_entities}
-        onChange={(e) => updateSection("core_entities", e.target.value)}
-        placeholder="The key entities in this system and their relationships..."
-      />
-
-      <h3>API / Interface</h3>
-      <textarea
-        value={answer.api_interface}
-        onChange={(e) => updateSection("api_interface", e.target.value)}
-        placeholder="The core API surface..."
-      />
-
-      <h3>High-Level Design</h3>
-      <textarea
-        value={answer.high_level_design_text}
-        onChange={(e) => updateSection("high_level_design_text", e.target.value)}
-        placeholder="Describe the high-level architecture..."
-      />
-      <p className="key-notice">Diagram (Mermaid syntax) &mdash; renders live below as you type:</p>
-      <textarea
-        value={answer.high_level_design_mermaid}
-        onChange={(e) => updateSection("high_level_design_mermaid", e.target.value)}
-        placeholder={"flowchart LR\n  A --> B"}
-        style={{ minHeight: "120px", fontFamily: "monospace" }}
-      />
-      <MermaidDiagram source={answer.high_level_design_mermaid} />
-      <p className="key-notice">Or paste a diagram image URL (Excalidraw export, screenshot, etc.):</p>
-      <input
-        type="text"
-        value={answer.high_level_design_image_url}
-        onChange={(e) => updateSection("high_level_design_image_url", e.target.value)}
-        placeholder="https://..."
-        style={{
-          width: "100%",
-          background: "#10141d",
-          color: "#e6e8ee",
-          border: "1px solid #1e2431",
-          borderRadius: "0.5rem",
-          padding: "0.6rem 0.75rem",
-        }}
-      />
-      {answer.high_level_design_image_url && (
-        // eslint-disable-next-line @next/next/no-img-element -- arbitrary user-supplied URL, next/image's domain allowlist doesn't apply
-        <img
-          src={answer.high_level_design_image_url}
-          alt="High-level design diagram"
-          style={{ maxWidth: "100%", marginTop: "0.75rem", borderRadius: "0.5rem" }}
+        <h3>Requirements</h3>
+        <p style={{ whiteSpace: "pre-wrap" }}>{renderInlineMarkdown(rubric.requirements_summary)}</p>
+        <textarea
+          value={answer.requirements}
+          onChange={(e) => updateSection("requirements", e.target.value)}
+          placeholder="Functional and non-functional requirements..."
         />
-      )}
 
-      <h3>Deep Dives</h3>
-      <textarea
-        value={answer.deep_dives}
-        onChange={(e) => updateSection("deep_dives", e.target.value)}
-        placeholder="Walk through the 2-3 hardest trade-offs, with real numbers where you can..."
-      />
+        <h3>Core Entities</h3>
+        <textarea
+          value={answer.core_entities}
+          onChange={(e) => updateSection("core_entities", e.target.value)}
+          placeholder="The key entities in this system and their relationships..."
+        />
 
-      <p className="key-notice">
-        Paste your own API key below &mdash; it is used only to call the provider directly from your
-        browser and is never sent to or stored on our servers. Provide either or both.
-      </p>
-      <label>
-        OpenAI API key
-        <input type="password" value={openaiKey} onChange={(e) => setOpenaiKey(e.target.value)} placeholder="sk-..." />
-      </label>
-      <label>
-        Anthropic API key
+        <h3>API / Interface</h3>
+        <textarea
+          value={answer.api_interface}
+          onChange={(e) => updateSection("api_interface", e.target.value)}
+          placeholder="The core API surface..."
+        />
+
+        <h3>High-Level Design</h3>
+        <textarea
+          value={answer.high_level_design_text}
+          onChange={(e) => updateSection("high_level_design_text", e.target.value)}
+          placeholder="Describe the high-level architecture..."
+        />
+        <p className="key-notice">Diagram (Mermaid syntax) &mdash; renders live below as you type:</p>
+        <textarea
+          value={answer.high_level_design_mermaid}
+          onChange={(e) => updateSection("high_level_design_mermaid", e.target.value)}
+          placeholder={"flowchart LR\n  A --> B"}
+          style={{ minHeight: "120px", fontFamily: "monospace" }}
+        />
+        <MermaidDiagram source={answer.high_level_design_mermaid} />
+        <p className="key-notice">Or paste a diagram image URL (Excalidraw export, screenshot, etc.):</p>
         <input
-          type="password"
-          value={anthropicKey}
-          onChange={(e) => setAnthropicKey(e.target.value)}
-          placeholder="sk-ant-..."
+          type="text"
+          value={answer.high_level_design_image_url}
+          onChange={(e) => updateSection("high_level_design_image_url", e.target.value)}
+          placeholder="https://..."
+          style={{
+            width: "100%",
+            background: "#10141d",
+            color: "#e6e8ee",
+            border: "1px solid #1e2431",
+            borderRadius: "0.5rem",
+            padding: "0.6rem 0.75rem",
+          }}
         />
-      </label>
+        {answer.high_level_design_image_url && (
+          // eslint-disable-next-line @next/next/no-img-element -- arbitrary user-supplied URL, next/image's domain allowlist doesn't apply
+          <img
+            src={answer.high_level_design_image_url}
+            alt="High-level design diagram"
+            style={{ maxWidth: "100%", marginTop: "0.75rem", borderRadius: "0.5rem" }}
+          />
+        )}
 
-      <p>
-        <button onClick={handleGrade} disabled={grading || !hasAnyAnswer || (!openaiKey && !anthropicKey)}>
-          {grading ? "Grading..." : "Grade my answer"}
-        </button>
-      </p>
+        <h3>Deep Dives</h3>
+        <textarea
+          value={answer.deep_dives}
+          onChange={(e) => updateSection("deep_dives", e.target.value)}
+          placeholder="Walk through the 2-3 hardest trade-offs, with real numbers where you can..."
+        />
 
-      {errors.map((err) => (
-        <p key={err} style={{ color: "#e08a8a" }}>
-          {err}
-        </p>
-      ))}
+        {rubric.related_deep_dives.length > 0 && (
+          <>
+            <h3>Related in the playbook</h3>
+            <ul>
+              {rubric.related_deep_dives.map((label) => (
+                <li key={label}>{label}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
 
-      {consensus && !consensus.agree && (
-        <div className="disagree-banner">
-          The two judges disagreed on your level &mdash; shown separately below rather than averaged.
+      <aside className="right-rail">
+        <div className="right-rail-panel">
+          <p className="key-notice">
+            Paste your own API key below &mdash; it is used only to call the provider directly from your
+            browser and is never sent to or stored on our servers. Provide either or both.
+          </p>
+          <label>
+            OpenAI API key
+            <input
+              type="password"
+              value={openaiKey}
+              onChange={(e) => setOpenaiKey(e.target.value)}
+              placeholder="sk-..."
+            />
+          </label>
+          <label>
+            Anthropic API key
+            <input
+              type="password"
+              value={anthropicKey}
+              onChange={(e) => setAnthropicKey(e.target.value)}
+              placeholder="sk-ant-..."
+            />
+          </label>
+
+          <button onClick={handleGrade} disabled={grading || !hasAnyAnswer || (!openaiKey && !anthropicKey)}>
+            {grading ? "Grading..." : "Grade my answer"}
+          </button>
         </div>
-      )}
 
-      {verdicts.map((v) => (
-        <div key={v.provider} className="verdict-card">
-          <strong>{v.provider === "openai" ? "OpenAI" : "Anthropic"}</strong>{" "}
-          <span className={`level-pill level-${v.assessed_level}`}>{LEVEL_LABEL[v.assessed_level]}</span>
-          <p>{v.overall_feedback}</p>
-          {v.image_used_as_vision_input === false && (
-            <p className="key-notice">
-              (The diagram image URL couldn&rsquo;t be used as a real visual input for this judge &mdash;
-              graded from text only.)
-            </p>
-          )}
-          {SECTION_ORDER.map((key) => {
-            const section = v.sections[key];
-            if (section.strengths.length === 0 && section.improvements.length === 0) return null;
-            return (
-              <div key={key} style={{ marginTop: "0.75rem" }}>
-                <strong>{SECTION_LABEL[key]}</strong>
-                {section.strengths.map((s) => (
-                  <div key={s}>&#10003; {s}</div>
-                ))}
-                {section.improvements.map((s) => (
-                  <div key={s}>&rarr; {s}</div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+        {errors.map((err) => (
+          <p key={err} style={{ color: "#e08a8a" }}>
+            {err}
+          </p>
+        ))}
 
-      {verdicts.length > 0 && (
-        <p className="key-notice">Estimated cost of this grading pass on your own key: ${totalCostUsd.toFixed(4)}</p>
-      )}
+        {consensus && !consensus.agree && (
+          <div className="disagree-banner">
+            The two judges disagreed on your level &mdash; shown separately below rather than averaged.
+          </div>
+        )}
 
-      {rubric.related_deep_dives.length > 0 && (
-        <>
-          <h3>Related in the playbook</h3>
-          <ul>
-            {rubric.related_deep_dives.map((label) => (
-              <li key={label}>{label}</li>
-            ))}
-          </ul>
-        </>
-      )}
+        {verdicts.map((v) => (
+          <div key={v.provider} className="verdict-card">
+            <strong>{v.provider === "openai" ? "OpenAI" : "Anthropic"}</strong>{" "}
+            <span className={`level-pill level-${v.assessed_level}`}>{LEVEL_LABEL[v.assessed_level]}</span>
+            <p>{v.overall_feedback}</p>
+            {v.image_used_as_vision_input === false && (
+              <p className="key-notice">
+                (The diagram image URL couldn&rsquo;t be used as a real visual input for this judge &mdash;
+                graded from text only.)
+              </p>
+            )}
+            {SECTION_ORDER.map((key) => {
+              const section = v.sections[key];
+              if (section.strengths.length === 0 && section.improvements.length === 0) return null;
+              return (
+                <div key={key} style={{ marginTop: "0.75rem" }}>
+                  <strong>{SECTION_LABEL[key]}</strong>
+                  {section.strengths.map((s) => (
+                    <div key={s}>&#10003; {s}</div>
+                  ))}
+                  {section.improvements.map((s) => (
+                    <div key={s}>&rarr; {s}</div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        {verdicts.length > 0 && (
+          <p className="key-notice">Estimated cost of this grading pass on your own key: ${totalCostUsd.toFixed(4)}</p>
+        )}
+      </aside>
     </main>
   );
 }
