@@ -1,6 +1,6 @@
 from practice_arena.questions import get_rubric, list_questions, load_rubrics
 
-EXPECTED_QUESTION_COUNT = 26  # Phase 2: all of ai-system-design/, general-system-design/, cloud-architecture/
+EXPECTED_QUESTION_COUNT = 35  # Phase 3: all 5 playbook folders, all 3 formats
 
 
 def test_load_rubrics_parses_the_real_launch_slice() -> None:
@@ -15,14 +15,46 @@ def test_every_rubric_has_all_four_levels() -> None:
             assert text.strip(), f"{rubric['question_id']}: empty criteria text for level '{level}'"
 
 
-def test_every_rubric_has_the_new_sectioned_fields() -> None:
+def test_every_system_design_rubric_has_the_sectioned_fields() -> None:
     for rubric in load_rubrics():
+        if rubric["format"] != "system_design":
+            continue
         assert rubric["core_entities_summary"].strip(), f"{rubric['question_id']}: empty core_entities_summary"
         assert rubric["api_interface_summary"].strip(), f"{rubric['question_id']}: empty api_interface_summary"
         assert rubric["high_level_design_summary"].strip(), f"{rubric['question_id']}: empty high_level_design_summary"
         assert rubric["reference_mermaid"], f"{rubric['question_id']}: no mermaid diagram extracted"
         assert rubric["deep_dives_summary"].strip(), f"{rubric['question_id']}: empty deep_dives_summary"
         assert "Deep dive " in rubric["deep_dives_summary"], f"{rubric['question_id']}: deep_dives_summary missing headings"
+
+
+def test_every_behavioral_rubric_has_the_star_fields() -> None:
+    for rubric in load_rubrics():
+        if rubric["format"] != "behavioral":
+            continue
+        assert rubric["generic_prompt"].strip(), f"{rubric['question_id']}: empty generic_prompt"
+        assert rubric["situation_summary"].strip(), f"{rubric['question_id']}: empty situation_summary"
+        assert rubric["task_summary"].strip(), f"{rubric['question_id']}: empty task_summary"
+        assert rubric["action_summary"].strip(), f"{rubric['question_id']}: empty action_summary"
+        assert rubric["result_summary"].strip(), f"{rubric['question_id']}: empty result_summary"
+        assert rubric["follow_up_question"].strip(), f"{rubric['question_id']}: empty follow_up_question"
+        assert rubric["follow_up_model_answer"].strip(), f"{rubric['question_id']}: empty follow_up_model_answer"
+
+
+def test_every_tradeoff_rubric_has_the_framework_fields() -> None:
+    for rubric in load_rubrics():
+        if rubric["format"] != "tradeoff":
+            continue
+        assert rubric["generic_prompt"].strip(), f"{rubric['question_id']}: empty generic_prompt"
+        assert rubric["framework_summary"].strip(), f"{rubric['question_id']}: empty framework_summary"
+        assert rubric["supporting_evidence_summary"].strip(), f"{rubric['question_id']}: empty supporting_evidence_summary"
+
+
+def test_rubric_formats_cover_all_35_with_expected_counts() -> None:
+    rubrics = load_rubrics()
+    counts: dict[str, int] = {}
+    for rubric in rubrics:
+        counts[rubric["format"]] = counts.get(rubric["format"], 0) + 1
+    assert counts == {"system_design": 26, "behavioral": 5, "tradeoff": 4}
 
 
 def test_list_questions_omits_level_criteria() -> None:

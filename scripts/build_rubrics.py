@@ -6,15 +6,24 @@ time. Rerun this whenever the pinned playbook commit is bumped (see
 PLAYBOOK_COMMIT below); CI fails the build if any question in QUESTION_SLICE
 fails to parse, so a rubric gap is never silently shipped.
 
-Phase 2 scope: all 26 entries across ai-system-design/, general-system-design/,
-and cloud-architecture/ are supported — they share one rubric shape (explicit
-"## Core entities", "## API / interface", "## High-level design", numbered
-"## Deep dive N: ..." sections, and a "## What's expected at each level"
-section naming Mid/Senior/Staff+/Principal behavior). behavioral/ and
-scalability-governance-tradeoffs/ use a genuinely different answer shape (STAR
-narrative; framework-plus-worked-example) that needs its own, differently-
-designed judge rubric — deferred to Phase 3 rather than force-fit into this
-parser.
+Phase 3 scope: all 35 entries across all 5 playbook folders are supported, in
+three formats:
+
+- **system_design** (`ai-system-design/`, `general-system-design/`,
+  `cloud-architecture/`, 26 entries): the hellointerview-style shape —
+  Requirements, Core entities, API/interface, High-level design, numbered
+  Deep dive sections, and a level-criteria section.
+- **behavioral** (`behavioral/`, 5 entries): STAR write-ups of Venkat's own
+  real cases. Not re-answerable literally, so each entry now also has a
+  generic, reusable "question, as it might actually be asked" section a
+  practicing user answers with their own experience — the real
+  Situation/Task/Action/Result stay as judge-reference/illustrative content.
+- **tradeoff** (`scalability-governance-tradeoffs/`, 4 entries): reasoning
+  frameworks. All 4 share "The question, as it might actually be asked" and
+  "The framework" headings, but the content between the framework and the
+  level-criteria section is NOT uniform across entries (1-2 differently-named
+  sections per entry) — extracted positionally via `_extract_between()`,
+  not by a shared heading pattern.
 """
 
 from __future__ import annotations
@@ -24,15 +33,11 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 PLAYBOOK_ROOT = Path(__file__).resolve().parent.parent / "content" / "playbook"
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "content" / "rubrics.json"
 
-# Phase 2: all 26 questions across the 3 folders that share the
-# Requirements/Core-Entities/API/HLD/Deep-Dives + Mid/Senior/Staff+/Principal
-# rubric shape. behavioral/ and scalability-governance-tradeoffs/ (9 more
-# questions) are STAR- and framework-shaped respectively — deferred to a
-# separate Phase 3 parser rather than force-fit here.
 QUESTION_SLICE: list[str] = [
     "ai-system-design/01-llm-inference-serving-at-scale.md",
     "ai-system-design/02-rag-platform-at-scale.md",
@@ -60,7 +65,24 @@ QUESTION_SLICE: list[str] = [
     "general-system-design/05-distributed-unique-id-generator.md",
     "general-system-design/06-collaborative-document-editing.md",
     "general-system-design/07-distributed-cache-cdn-layer.md",
+    "behavioral/01-staffing-reduction-10-to-2.md",
+    "behavioral/02-finops-audit-and-fix.md",
+    "behavioral/03-org-wide-security-hardening.md",
+    "behavioral/04-payments-and-edi-modernization.md",
+    "behavioral/05-leading-a-0-to-1-ai-product-build.md",
+    "scalability-governance-tradeoffs/01-cost-vs-latency-vs-safety.md",
+    "scalability-governance-tradeoffs/02-build-vs-buy-shared-services.md",
+    "scalability-governance-tradeoffs/03-centralize-vs-federate-governance.md",
+    "scalability-governance-tradeoffs/04-build-vs-train-vs-finetune-foundation-model-strategy.md",
 ]
+
+_CATEGORY_FORMATS: dict[str, str] = {
+    "ai-system-design": "system_design",
+    "general-system-design": "system_design",
+    "cloud-architecture": "system_design",
+    "behavioral": "behavioral",
+    "scalability-governance-tradeoffs": "tradeoff",
+}
 
 _LEVEL_KEYS = {
     "mid-level": "mid",
@@ -71,10 +93,11 @@ _LEVEL_KEYS = {
 
 
 @dataclass(frozen=True)
-class Rubric:
+class SystemDesignRubric:
     question_id: str
     title: str
     category: str
+    format: Literal["system_design"]
     requirements_summary: str
     core_entities_summary: str
     api_interface_summary: str
@@ -83,6 +106,39 @@ class Rubric:
     deep_dives_summary: str
     level_criteria: dict[str, str]
     related_deep_dives: list[str]
+
+
+@dataclass(frozen=True)
+class BehavioralRubric:
+    question_id: str
+    title: str
+    category: str
+    format: Literal["behavioral"]
+    generic_prompt: str
+    situation_summary: str
+    task_summary: str
+    action_summary: str
+    result_summary: str
+    follow_up_question: str
+    follow_up_model_answer: str
+    level_criteria: dict[str, str]
+    related_deep_dives: list[str]
+
+
+@dataclass(frozen=True)
+class TradeoffRubric:
+    question_id: str
+    title: str
+    category: str
+    format: Literal["tradeoff"]
+    generic_prompt: str
+    framework_summary: str
+    supporting_evidence_summary: str
+    level_criteria: dict[str, str]
+    related_deep_dives: list[str]
+
+
+Rubric = SystemDesignRubric | BehavioralRubric | TradeoffRubric
 
 
 class RubricParseError(ValueError):
@@ -94,6 +150,45 @@ def _extract_section(body: str, heading: str) -> str | None:
     pattern = rf"^## {re.escape(heading)}\s*\n(.*?)(?=^## |\Z)"
     match = re.search(pattern, body, re.MULTILINE | re.DOTALL)
     return match.group(1).strip() if match else None
+
+
+def _iter_headings(body: str) -> list[tuple[str, str]]:
+    """Returns (heading, content) pairs for every top-level '## ' section, in
+    document order — the positional building block `_extract_between()` uses."""
+    pattern = r"^## (.+?)\s*\n(.*?)(?=^## |\Z)"
+    return re.findall(pattern, body, re.MULTILINE | re.DOTALL)
+
+
+def _extract_between(body: str, after_heading: str, before_heading: str) -> str:
+    """Concatenates every '## ...' section strictly between two known anchor
+    headings, preserving each section's own heading text. Used for the
+    trade-offs category's middle content, which has no shared heading text
+    across entries (unlike '## Deep dive N: ...', there's no prefix pattern to
+    match) -- the extraction rule is positional, not pattern-matched."""
+    headings = _iter_headings(body)
+    names = [h for h, _ in headings]
+    if after_heading not in names:
+        raise RubricParseError(f"heading '## {after_heading}' not found")
+    if before_heading not in names:
+        raise RubricParseError(f"heading '## {before_heading}' not found")
+    start = names.index(after_heading) + 1
+    end = names.index(before_heading)
+    if start >= end:
+        raise RubricParseError(f"no sections found between '## {after_heading}' and '## {before_heading}'")
+    middle = headings[start:end]
+    return "\n\n".join(f"## {heading}\n{content.strip()}" for heading, content in middle)
+
+
+def _split_follow_up(section_body: str, relative_path: str) -> tuple[str, str]:
+    """The follow-up section is '**"<question>"** <model answer prose>' --
+    split the bolded, quoted question from the prose that answers it."""
+    match = re.match(r'\*\*"(.+?)"\*\*\s*(.*)', section_body.strip(), re.DOTALL)
+    if not match:
+        raise RubricParseError(
+            f"{relative_path}: follow-up section doesn't match the expected "
+            '\'**"<question>"** <answer>\' shape'
+        )
+    return match.group(1).strip(), match.group(2).strip()
 
 
 def _parse_level_criteria(level_section: str) -> dict[str, str]:
@@ -141,7 +236,9 @@ def _extract_mermaid(section_body: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def parse_entry(relative_path: str) -> Rubric:
+def _read_entry(relative_path: str) -> tuple[str, str, str, str]:
+    """Returns (raw text, title, category, question_id) -- the boilerplate
+    shared by all three format-specific parsers below."""
     full_path = PLAYBOOK_ROOT / relative_path
     if not full_path.exists():
         raise RubricParseError(f"{relative_path} not found under {PLAYBOOK_ROOT}")
@@ -151,6 +248,14 @@ def parse_entry(relative_path: str) -> Rubric:
     if not title_match:
         raise RubricParseError(f"{relative_path}: no H1 title found")
     title = title_match.group(1).strip()
+
+    category = relative_path.split("/", 1)[0]
+    question_id = f"{category}/{Path(relative_path).stem}"
+    return text, title, category, question_id
+
+
+def _parse_system_design_entry(relative_path: str) -> SystemDesignRubric:
+    text, title, category, question_id = _read_entry(relative_path)
 
     requirements = _extract_section(text, "Requirements")
     if requirements is None:
@@ -182,13 +287,11 @@ def parse_entry(relative_path: str) -> Rubric:
     related_pairs = _extract_related_links(text)
     related_labels = [label for label, _href in related_pairs]
 
-    category = relative_path.split("/", 1)[0]
-    question_id = Path(relative_path).stem  # e.g. "01-llm-inference-serving-at-scale"
-
-    return Rubric(
-        question_id=f"{category}/{question_id}",
+    return SystemDesignRubric(
+        question_id=question_id,
         title=title,
         category=category,
+        format="system_design",
         requirements_summary=requirements.strip(),
         core_entities_summary=core_entities.strip(),
         api_interface_summary=api_interface.strip(),
@@ -198,6 +301,114 @@ def parse_entry(relative_path: str) -> Rubric:
         level_criteria=level_criteria,
         related_deep_dives=related_labels,
     )
+
+
+def _parse_behavioral_entry(relative_path: str) -> BehavioralRubric:
+    text, title, category, question_id = _read_entry(relative_path)
+
+    generic_prompt = _extract_section(text, "The question, as it might actually be asked")
+    if generic_prompt is None:
+        raise RubricParseError(
+            f"{relative_path}: no '## The question, as it might actually be asked' section found"
+        )
+
+    situation = _extract_section(text, "Situation")
+    if situation is None:
+        raise RubricParseError(f"{relative_path}: no '## Situation' section found")
+
+    task = _extract_section(text, "Task")
+    if task is None:
+        raise RubricParseError(f"{relative_path}: no '## Task' section found")
+
+    action = _extract_section(text, "Action")
+    if action is None:
+        raise RubricParseError(f"{relative_path}: no '## Action' section found")
+
+    result = _extract_section(text, "Result")
+    if result is None:
+        raise RubricParseError(f"{relative_path}: no '## Result' section found")
+
+    follow_up_section = _extract_section(text, "The follow-up question you should expect")
+    if follow_up_section is None:
+        raise RubricParseError(
+            f"{relative_path}: no '## The follow-up question you should expect' section found"
+        )
+    follow_up_question, follow_up_model_answer = _split_follow_up(follow_up_section, relative_path)
+
+    level_section = _extract_section(text, "What's expected at each level")
+    if level_section is None:
+        raise RubricParseError(f"{relative_path}: no '## What's expected at each level' section found")
+    level_criteria = _parse_level_criteria(level_section)
+
+    related_pairs = _extract_related_links(text)
+    related_labels = [label for label, _href in related_pairs]
+
+    return BehavioralRubric(
+        question_id=question_id,
+        title=title,
+        category=category,
+        format="behavioral",
+        generic_prompt=generic_prompt.strip(),
+        situation_summary=situation.strip(),
+        task_summary=task.strip(),
+        action_summary=action.strip(),
+        result_summary=result.strip(),
+        follow_up_question=follow_up_question,
+        follow_up_model_answer=follow_up_model_answer,
+        level_criteria=level_criteria,
+        related_deep_dives=related_labels,
+    )
+
+
+def _parse_tradeoff_entry(relative_path: str) -> TradeoffRubric:
+    text, title, category, question_id = _read_entry(relative_path)
+
+    generic_prompt = _extract_section(text, "The question, as it might actually be asked")
+    if generic_prompt is None:
+        raise RubricParseError(
+            f"{relative_path}: no '## The question, as it might actually be asked' section found"
+        )
+
+    framework = _extract_section(text, "The framework")
+    if framework is None:
+        raise RubricParseError(f"{relative_path}: no '## The framework' section found")
+
+    try:
+        supporting_evidence = _extract_between(text, "The framework", "What's expected at each level")
+    except RubricParseError as exc:
+        raise RubricParseError(f"{relative_path}: {exc}") from exc
+
+    level_section = _extract_section(text, "What's expected at each level")
+    if level_section is None:
+        raise RubricParseError(f"{relative_path}: no '## What's expected at each level' section found")
+    level_criteria = _parse_level_criteria(level_section)
+
+    related_pairs = _extract_related_links(text)
+    related_labels = [label for label, _href in related_pairs]
+
+    return TradeoffRubric(
+        question_id=question_id,
+        title=title,
+        category=category,
+        format="tradeoff",
+        generic_prompt=generic_prompt.strip(),
+        framework_summary=framework.strip(),
+        supporting_evidence_summary=supporting_evidence,
+        level_criteria=level_criteria,
+        related_deep_dives=related_labels,
+    )
+
+
+def parse_entry(relative_path: str) -> Rubric:
+    category = relative_path.split("/", 1)[0]
+    entry_format = _CATEGORY_FORMATS.get(category)
+    if entry_format == "system_design":
+        return _parse_system_design_entry(relative_path)
+    if entry_format == "behavioral":
+        return _parse_behavioral_entry(relative_path)
+    if entry_format == "tradeoff":
+        return _parse_tradeoff_entry(relative_path)
+    raise RubricParseError(f"{relative_path}: unknown category '{category}'")
 
 
 def build() -> list[Rubric]:
