@@ -16,6 +16,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   "ai-system-design": "AI System Design",
   "general-system-design": "General System Design",
   "cloud-architecture": "Cloud Architecture",
+  behavioral: "Behavioral",
+  "scalability-governance-tradeoffs": "Scalability & Governance Trade-offs",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
