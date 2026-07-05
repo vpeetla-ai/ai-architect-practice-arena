@@ -1,5 +1,6 @@
-import type { JudgeAdapter, JudgeVerdict, Rubric } from "./types";
+import type { JudgeAdapter, JudgeVerdict, Rubric, SectionedAnswer } from "./types";
 import { buildJudgePrompt } from "./prompt";
+import { normalizeLevel, normalizeOverallFeedback, normalizeSections } from "./parseVerdict";
 
 const OPENAI_MODEL = "gpt-4.1-mini";
 
@@ -26,28 +27,54 @@ const OPENAI_API_BASE =
   process.env.NEXT_PUBLIC_OPENAI_API_BASE ??
   (isBrowser ? "/api/openai-proxy" : "https://api.openai.com/v1/chat/completions");
 
+async function callOpenAI(
+  system: string,
+  user: string,
+  imageUrl: string | undefined,
+  apiKey: string,
+): Promise<Response> {
+  const userContent = imageUrl
+    ? [
+        { type: "text", text: user },
+        { type: "image_url", image_url: { url: imageUrl } },
+      ]
+    : user;
+
+  return fetch(OPENAI_API_BASE, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: userContent },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+    }),
+  });
+}
+
 export const openaiAdapter: JudgeAdapter = {
   provider: "openai",
 
-  async judge(rubric: Rubric, answerText: string, apiKey: string): Promise<JudgeVerdict> {
-    const { system, user } = buildJudgePrompt(rubric, answerText);
+  async judge(rubric: Rubric, answer: SectionedAnswer, apiKey: string): Promise<JudgeVerdict> {
+    const { system, user } = buildJudgePrompt(rubric, answer);
+    const imageUrl = answer.high_level_design_image_url;
 
-    const response = await fetch(OPENAI_API_BASE, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0,
-      }),
-    });
+    // Graceful degradation: if an image was provided, try including it as a
+    // real vision input first; if that call fails for any reason (provider
+    // rejects the format, the image isn't fetchable, etc.), retry text-only
+    // rather than failing the whole grading call over one optional field.
+    let response = await callOpenAI(system, user, imageUrl, apiKey);
+    let imageUsed = Boolean(imageUrl);
+    if (imageUrl && !response.ok) {
+      response = await callOpenAI(system, user, undefined, apiKey);
+      imageUsed = false;
+    }
 
     if (!response.ok) {
       const detail = await response.text();
@@ -63,10 +90,10 @@ export const openaiAdapter: JudgeAdapter = {
 
     return {
       provider: "openai",
-      assessed_level: parsed.assessed_level,
-      met_criteria: parsed.met_criteria ?? [],
-      missing_criteria: parsed.missing_criteria ?? [],
-      specific_feedback: parsed.specific_feedback ?? "",
+      assessed_level: normalizeLevel(parsed),
+      overall_feedback: normalizeOverallFeedback(parsed),
+      sections: normalizeSections(parsed),
+      image_used_as_vision_input: imageUrl ? imageUsed : undefined,
       prompt_tokens: data.usage?.prompt_tokens ?? 0,
       completion_tokens: data.usage?.completion_tokens ?? 0,
     };
