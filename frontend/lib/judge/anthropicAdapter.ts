@@ -62,12 +62,28 @@ export const anthropicAdapter: JudgeAdapter = {
       throw new Error(`Anthropic judge call failed (${response.status}): ${detail}`);
     }
 
-    const data = await response.json();
-    const textBlock = (data.content ?? []).find((block: { type: string }) => block.type === "text");
-    if (!textBlock) {
-      throw new Error("Anthropic judge returned no text content");
+    let data = await response.json();
+    let parsed = parseAnthropicResponse(data);
+
+    // Anthropic's Messages API has no strict JSON-mode like OpenAI's
+    // response_format -- caught live via calibration (ai-system-design/04,
+    // reproduced identically twice): it can emit a technically-invalid JSON
+    // string, e.g. an unescaped quote inside a strengths/improvements array
+    // element. One resample is cheap and the same prompt against the same
+    // content parses fine most of the time, so retry once before giving up
+    // rather than failing the whole grading call over a formatting slip.
+    if (parsed === null) {
+      response = await callAnthropic(system, user, imageUsed ? imageUrl : undefined, apiKey);
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Anthropic judge retry call failed (${response.status}): ${detail}`);
+      }
+      data = await response.json();
+      parsed = parseAnthropicResponse(data);
+      if (parsed === null) {
+        throw new Error("Anthropic judge returned invalid or missing JSON content twice in a row");
+      }
     }
-    const parsed = JSON.parse(extractJson(textBlock.text));
 
     return {
       provider: "anthropic",
@@ -80,6 +96,20 @@ export const anthropicAdapter: JudgeAdapter = {
     };
   },
 };
+
+/** Returns the parsed JSON verdict, or null if the response had no text
+ * block or the text wasn't valid JSON -- callers decide whether to retry. */
+function parseAnthropicResponse(data: { content?: { type: string; text?: string }[] }): unknown | null {
+  const textBlock = (data.content ?? []).find((block) => block.type === "text");
+  if (!textBlock?.text) {
+    return null;
+  }
+  try {
+    return JSON.parse(extractJson(textBlock.text));
+  } catch {
+    return null;
+  }
+}
 
 // Anthropic's Messages API doesn't have a strict json_object response_format
 // like OpenAI's; the prompt instructs the model to return only JSON, but
