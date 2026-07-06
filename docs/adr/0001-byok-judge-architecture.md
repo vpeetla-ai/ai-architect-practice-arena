@@ -227,6 +227,69 @@ with the sidebar already visible, clicking any question swaps in that question's
 rail without a screen-level jump, and the active-highlight/URL/header-text all agree after the
 transition settles.
 
+## Phase 3 — behavioral (STAR) + trade-offs (reasoning framework), 2026-07-06
+
+Extends coverage from 26 to all 35 playbook questions by adding two new rubric formats for the
+9 questions Phase 2 deliberately deferred: `behavioral/` (5 STAR write-ups) and
+`scalability-governance-tradeoffs/` (4 reasoning-framework questions).
+
+**A real content gap found before any code was written.** Neither category had the
+"what's expected at each level" section every system-design question has — grepped both folders
+for the pattern and found zero real matches. Grading against criteria that don't exist yet would
+mean inventing them only in this app's build script, breaking the "rubric parsed from the
+playbook, not re-authored" property this ADR and ADR-018 both rely on. Fixed upstream first: a
+separate commit to `ai-architect-interview-playbook` (submodule bumped here afterward) added a
+real level-criteria section to all 9 entries, plus a new generic, reusable "question, as it might
+actually be asked" section to the 5 behavioral entries specifically — a STAR write-up is Venkat's
+own real case (Lucid Motors, Volvo), so a practicing user has no way to answer it literally
+without inventing fake company facts; the generic prompt lets them answer with their own real
+experience against the same underlying competency, with the real case shown only as a labeled
+illustrative example.
+
+**A second real asymmetry, found by reading all 4 trade-offs entries in full before designing the
+parser.** All 4 share `## The question, as it might actually be asked` and `## The framework`
+(same heading text), but the content between them isn't uniform — entry 01 has two different
+sub-sections than entries 02/03, and entry 04 has an extra section the other 3 don't. `_extract_
+between()` (new, in `build_rubrics.py`) handles this positionally — everything between two known
+anchor headings, sub-headings preserved — rather than forcing a fake shared structure the way the
+existing `Deep dive N:` extractor matches a real shared prefix.
+
+**Format-aware, not format-specific.** `Rubric`/`Answer` became discriminated unions
+(`system_design | behavioral | tradeoff`) rather than three separate code paths: one
+`buildJudgePrompt()` branches into three prompt builders sharing one JSON contract shape;
+`normalizeSections()` takes the section-key list as a parameter instead of a hardcoded constant;
+the two judge adapters needed zero changes to their model-calling logic (`buildJudgePrompt` now
+returns `imageUrl` alongside `system`/`user` so adapters never need to know which answer shape
+they're holding). The practice page's sidebar and right rail (keys, Grade button, results) are
+fully shared across all three formats — only the center-column form branches per format.
+
+**Calibration — run for real against live OpenAI + Anthropic, all 35 questions (140 cases):
+139/140 passed, confirmed twice across two independent full runs.** All 18 new cases for the 9
+Phase 3 questions passed cleanly both times — including the "strong" answers, which were
+deliberately written with different concrete scenarios than each entry's own illustrative case
+(a support-ticket-triage story instead of Lucid Motors', an e-commerce/payments story instead of
+Volvo's), a real test of whether the judge actually grades the underlying competency rather than
+recognizing a paraphrase of the reference example. The one failure, reproduced identically in both
+runs, was in an already-shipped Phase 2 question
+(`[anthropic] ai-system-design/04-feature-store-finetuning-data-pipeline (strong)`):
+`SyntaxError: Expected ',' or ']' after array element in JSON at position 3946`. Diagnosed as a
+real gap, not a fluke — Anthropic's Messages API has no strict JSON-mode like OpenAI's
+`response_format`, so it can occasionally emit technically invalid JSON (most likely an unescaped
+quote inside a strengths/improvements array element). **Fixed**: `anthropicAdapter.judge()` now
+retries the call once when the response has no parseable JSON text block, via a new
+`parseAnthropicResponse()` helper that returns `null` instead of throwing so the caller can decide
+to retry — the same "one resample is cheap, don't fail the whole call over a recoverable issue"
+pattern already used for the image-vision-input fallback. OpenAI needs no equivalent fix, since
+its `response_format: json_object` already guarantees syntactically valid JSON at the API level.
+**This specific fix has not yet been reconfirmed with a third live run** — disclosed here rather
+than assumed resolved, the same discipline Phase 2's documentation followed.
+
+Verified live after redeploying: `practice-arena-api.onrender.com/questions` returns all 35
+questions with the correct per-category counts (13/6/7/5/4); a sample rubric fetch for one
+behavioral and one tradeoff question returns the new fields correctly; the production frontend's
+sidebar lists all 35 questions across 5 categories including the 2 new ones; both new formats'
+practice pages return 200; the OpenAI proxy still works correctly in production.
+
 ## Consequences
 
 ### Positive
@@ -235,23 +298,26 @@ transition settles.
 - Judge disagreement is a real, surfaced signal (`ConsensusResult.agree`), not silently averaged
   away — a Staff+ answer that only one judge recognizes as such is more informative than a
   single blended score.
-- The rubric is guaranteed to match the playbook's own text, since it's parsed, not re-authored.
-- All 26 system-design-shaped questions now share one sectioned mock-interview experience with
-  per-section feedback, not just a flat level and comment.
+- The rubric is guaranteed to match the playbook's own text, since it's parsed, not re-authored —
+  including the new behavioral/trade-offs level-criteria and generic prompts, authored upstream
+  rather than invented in this app.
+- All 35 of the playbook's questions now share one mock-interview experience — sectioned
+  system-design forms, full STAR practice for behavioral, and framework-plus-example for
+  trade-offs — with per-section feedback from both judges, not just a flat level and comment.
 
 ### Negative
 - The OpenAI proxy is a real, if minimal, server-side component — it's the one place a user's
   key transits infrastructure we operate, even though nothing is stored. This asymmetry between
   providers is disclosed plainly in the UI's key-handling notice.
-- 9 of the playbook's 35 questions (`behavioral/` 5, `scalability-governance-tradeoffs/` 4) are
-  still not covered — genuinely STAR- and framework-shaped, deferred to a Phase 3 with its own,
-  not-yet-designed rubric and UI rather than force-fit into these five sections.
 - Calibration only covers one weak and one strong answer per question; real answers in practice
   will span a much wider range of quality and style than these two deliberately clear-cut
   reference points, so this is evidence the harness works in the direction intended, not proof
   it's accurate across the full spectrum of real, messier answers.
 - The image-vision-input path is implemented with a graceful text-only fallback but has no live
-  confirmation yet that either provider actually accepts it as a real visual input, as noted above.
+  confirmation yet that either provider actually accepts it as a real visual input.
+- The anthropicAdapter malformed-JSON retry fix (above) has not yet been reconfirmed with a fresh
+  live run — the one failure it targets was reproduced twice before the fix, not yet re-tested
+  after it.
 
 ## References
 - [ai-architect-interview-playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook) — the rubric source of truth
