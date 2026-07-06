@@ -544,5 +544,152 @@
       "deep_dives": "The thundering herd problem -- many concurrent requests missing simultaneously when a popular entry expires or a node fails, all hammering the origin at once -- is mitigated with request coalescing (the first miss populates the cache, concurrent requests wait on that result) or jittered TTLs so entries don't all expire at once. Cross-region cache invalidation is a genuinely hard trade-off: synchronous propagation adds write latency; asynchronous leaves a real staleness window -- naming this trade-off explicitly, the way Meta's real architecture had to, is what a senior-only answer misses."
     },
     "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "behavioral/01-staffing-reduction-10-to-2",
+    "weak_answer": {
+      "situation": "Our team had a lot of manual work reviewing support tickets.",
+      "task": "We wanted to use AI to handle more of it.",
+      "action": "I built a bot that used an LLM to auto-reply to tickets.",
+      "result": "We reduced the team size a bit and things seemed to go okay.",
+      "follow_up_response": "We just watched it for a while and it seemed fine, so we kept scaling it up."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "situation": "Our e-commerce ops team of 8 was manually triaging return requests -- checking item-condition claims against photos, matching them to order history, and deciding refund vs. replacement vs. deny -- at a volume that couldn't scale with order growth without adding headcount every quarter.",
+      "task": "Automate the bulk of these decisions without introducing fraud risk or customer-trust damage from a wrong call, since a bad automated refund decision is a real financial and reputational cost, not just an inconvenience.",
+      "action": "Built a pipeline that checked three distinct things per case, not one blended 'looks legit' pass: structural correctness (did the claim include the required photo/order-ID pair the schema needed), grounding (did the claimed item condition match what the photo actually showed, not just what the customer wrote), and risk-tier (order value, customer return history, and whether the item was flagged high-fraud-category). Only the risk-tier signal decided whether a case auto-resolved or routed to a human -- low-value, low-risk-history cases resolved automatically; anything above a dollar or history threshold got a human-approval gate, regardless of how confident the model was.",
+      "result": "Manual triage headcount went from 8 to 3, with the automated share handling roughly 75% of volume; the 3 remaining staff handled the flagged 25% plus spot-audited a sample of automated decisions weekly against the risk-tier logs.",
+      "follow_up_response": "We didn't scale the automated share based on a gut feeling that it was working -- we tracked pass rates separately per risk tier (not one blended accuracy number) plus a weekly audit trail review of every gated decision, and only expanded the auto-resolve threshold as those tier-specific numbers held up over several weeks of real volume. The headcount number was a consequence of that evidence, not a target we were automating toward."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "behavioral/02-finops-audit-and-fix",
+    "weak_answer": {
+      "situation": "We had a blog post claiming our system was cost-efficient.",
+      "task": "I checked if that was actually true.",
+      "action": "I looked at the code and found some things that weren't quite right, so I fixed them.",
+      "result": "The numbers are more accurate now.",
+      "follow_up_response": "I just went with the first fix that came to mind."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "situation": "I'd publicly claimed in a conference talk that our recommendation service's per-request cost was fully instrumented and used to drive infra decisions -- a strong, checkable claim that nobody was actively pressuring me to re-verify.",
+      "task": "Audit the actual code behind that claim across the two services that fed the dashboard I'd shown, rather than assume the talk's claim still held months later.",
+      "action": "Read the real request-handling code, not just the dashboard. Found that one service's 'cost per request' was computed from a fixed per-model rate card that hadn't been updated in two pricing cycles, and the other estimated token counts from response character length even though the real API response already contained exact token counts that were being discarded. My first-draft fix was to patch each service's estimate independently, but mid-plan I realized that wouldn't produce a trustworthy cross-service total -- two services each computing 'their own' corrected number still couldn't answer 'what's our real combined spend' without one shared source of truth. I built a small shared metering library both services called instead, verified it against a live instance with real traffic before switching either service over.",
+      "result": "Both services now report real, metered cost instead of stale or guessed numbers, and the audit itself became evidence for the original claim -- a self-audit with a shipped fix, not just a restated assertion.",
+      "follow_up_response": "I didn't patch the two services independently because the actual capability that mattered -- a trustworthy cross-service total -- structurally requires one shared ledger; two independently-corrected estimates still can't be reconciled after the fact. That requirement wasn't in my original plan; I changed the approach once I saw it rather than shipping the faster, locally-correct-but-globally-useless fix."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "behavioral/03-org-wide-security-hardening",
+    "weak_answer": {
+      "situation": "I found an endpoint that didn't require a login.",
+      "task": "I needed to fix it.",
+      "action": "I added an authentication check to that endpoint.",
+      "result": "The endpoint is now secured.",
+      "follow_up_response": "I don't think it's an issue anywhere else."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "situation": "While reviewing one microservice for a security questionnaire, I noticed its internal 'trigger batch job' endpoint had no caller authentication at all -- anyone with the URL could kick off an expensive job.",
+      "task": "Rather than just patch that one endpoint, find out how widespread this exact pattern was across the six services our team owned and fix it consistently, without breaking the zero-config local dev experience every service's README promised.",
+      "action": "Audited all six services specifically for this pattern and found it in four more, including one where the same gap existed independently in both its main API and a separate serverless function -- the same mistake made twice in two different runtimes for the same service. Fixed all five with one consistent pattern: an API-key check that's enforced only when the key environment variable is actually set in that deployment. Unset means open, so local/dev usage never broke, but every real deployment got real protection by setting one variable. While fixing the service with the widest blast radius, I also noticed a second, adjacent gap -- the caller's claimed identity in the request body was never actually verified against anything -- and flagged it explicitly in that service's own risk register rather than letting the auth fix imply a completeness it didn't have.",
+      "result": "All five services gained the same consistent, opt-in auth gate, documented in each service's own deploy docs next to the environment variable to set; the adjacent identity-spoofing risk was disclosed rather than silently left for someone to discover later.",
+      "follow_up_response": "The fix wasn't just the code change -- every service's README status table and deploy docs were updated in the same commit to call out exactly which environment variable to set before a real deployment, so the gap between 'secure by default' and 'secure once someone remembers to configure it' is visible in the same place someone would look before shipping, not buried in a commit history nobody reads before deploying."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "behavioral/04-payments-and-edi-modernization",
+    "weak_answer": {
+      "situation": "Our payment integration was old and our EDI vendor was expensive.",
+      "task": "I needed to modernize both.",
+      "action": "I moved us to a new payment provider and stopped using the EDI vendor.",
+      "result": "Things are better now.",
+      "follow_up_response": "It just seemed worth it."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "situation": "Our checkout only supported one payment gateway, which didn't have great coverage or reliability in a region we were expanding into, and our inventory-sync integration ran through a licensed EDI translator that we had zero visibility or control into -- every schema change from a trading partner became a vendor support ticket with its own cost and multi-week lead time.",
+      "task": "Add real regional payment capability that could scale to future regions, and bring the EDI translation logic in-house so schema changes became internal work instead of vendor tickets -- accepting more short-term migration complexity for long-term ownership.",
+      "action": "For payments, built a gateway-abstraction boundary so each region's specific gateway is a pluggable adapter behind one common transaction interface -- a region-specific quirk (currency handling, local payment methods) lives in that region's adapter, not as conditional logic scattered through the core checkout flow. For EDI, stopped treating trading-partner documents as an opaque format only the vendor's black-box translator understood; built an internal parser that turned those documents into the same domain events the rest of the inventory system already consumed, so a new trading-partner requirement became a code change we owned, not a vendor ticket.",
+      "result": "The new region's payment success rate improved measurably and future regions could be added by writing one new adapter instead of a new integration project; EDI-related vendor costs dropped substantially and schema changes that used to take weeks became days, handled by our own team.",
+      "follow_up_response": "The faster path in both cases was more vendor lock-in with a hard ceiling -- another region-specific gateway integration that wouldn't extend to the next region without redoing the work, or continuing to depend entirely on a vendor's translator and support cycle for every schema change. The complexity we accepted upfront was specifically the kind that pays down over time (an owned boundary, an owned parsing layer), not the kind that just accumulates, which is what made it worth defending against pressure to just ship the quicker integration."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "behavioral/05-leading-a-0-to-1-ai-product-build",
+    "weak_answer": {
+      "situation": "We wanted to build a new AI product from scratch.",
+      "task": "I had to figure out what to build.",
+      "action": "I built as many features as I could think of and shipped it.",
+      "result": "We launched the product.",
+      "follow_up_response": "I think we got most of it right."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "situation": "Asked to build a 0-to-1 internal tool that would draft and post content across several external channels on a team's behalf, with the ambiguity being in the scope itself -- how much should actually auto-publish versus require a human, and which channels were even worth real integration effort.",
+      "task": "Ship something real rather than a demo, avoiding both a fully autonomous publisher nobody had actually asked for (a real compliance risk) and a polished-looking demo where 'publish' was fake.",
+      "action": "Made one structural decision early and never treated it as configurable: every irreversible action -- anything that posted publicly -- gated behind explicit human approval, enforced at the workflow-graph level, not as a settings toggle someone could quietly disable. The harder call was scope: two of the five target channels had a real, stable publish API; the other three didn't have anything comparable. Rather than fake auto-publish for those three in a way that would break silently later, I shipped real OAuth-based publishing only for the two real channels and disclosed the other three as a manual copy-export, stated plainly in the product itself rather than hidden in documentation.",
+      "result": "A real, running tool with genuine automated publishing to two channels, honest disclosed limitations on three, and a governance gate that couldn't be quietly bypassed -- shipped faster than trying to fake full automation everywhere would have allowed, and without the trust risk of a pipeline that silently mishandled channels it didn't really support.",
+      "follow_up_response": "A stakeholder did push for all five channels to auto-publish at launch. My answer was that faking auto-publish on a channel without a real, stable API creates a worse failure mode than disclosing the limitation -- a pipeline that silently breaks or posts malformed content on three of five channels is a bigger trust and compliance risk than a product that's transparent about doing two things well and three as a manual-friendly export. Scoping down to what was real, and disclosing the gap instead of hiding it, held up even under pressure to look more complete on paper."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "scalability-governance-tradeoffs/01-cost-vs-latency-vs-safety",
+    "weak_answer": {
+      "framework": "Cost, latency, and safety are all important and you have to balance them. It depends on the situation.",
+      "applied_example": "Sometimes you care more about one than the others."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "framework": "These three don't trade off as a fixed triangle where you permanently pick two -- the right answer changes per decision point within the same system, and the skill is naming which axis is non-negotiable for this specific call. Safety wins when the action is irreversible or customer-facing at scale (a refund, an external message) -- these get a human-in-the-loop gate regardless of latency cost, because a bad autonomous action is asymmetrically worse than the cumulative cost of approvals. Latency wins when the user is waiting synchronously and the action itself is low-risk -- a synchronous answer shouldn't wait on a policy check meant for a different, higher-risk part of the pipeline. Cost only becomes the deciding axis once safety and latency are already satisfied and volume is the remaining variable -- and it needs a real, metered number to optimize against, not a guessed one.",
+      "applied_example": "In a support-automation pipeline I worked on, the refund-issuance path kept a human-approval gate even after the model's confidence scores were consistently high, because the cost of one bad autonomous refund at scale outweighed the latency savings of removing the gate. Meanwhile the FAQ-answering path never routed through that same approval flow at all -- only answers flagged by a separate grounding check got a review step, so most queries returned synchronously. Cost optimization only got real investment after both of those gates were already correctly placed -- before that, cost numbers were guessed, and optimizing a guessed number isn't a real trade-off decision at all."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "scalability-governance-tradeoffs/02-build-vs-buy-shared-services",
+    "weak_answer": {
+      "framework": "You can build it yourself, put the logic in each place that needs it, or just buy something. Depends what's easier.",
+      "applied_example": "We usually just build things ourselves."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "framework": "The deciding question is whether there's a real cross-consumer question this capability needs to answer, not just whether multiple consumers happen to need similar logic. Embedding the logic separately in each consumer is fastest for the first one but gets structurally worse with each additional consumer -- N independently-evolving copies drift apart and can never answer a cross-consumer question without reconciling them after the fact. A standalone shared service costs more upfront (a new deployable, a real interface contract) but is the only option that can answer that cross-consumer question correctly. Buying only makes sense when the capability is genuinely commodity and doesn't need deep integration with your own domain model -- otherwise the 'vendor relationship' itself becomes the new coupling problem.",
+      "applied_example": "Two platforms I worked on both needed real usage-cost metering. The first draft embedded corrected metering logic separately in each platform's own codebase. Partway through, it became clear that a real cross-platform budget total was structurally impossible that way -- two platforms each computing 'their own' cost can never produce one trustworthy total without a shared ledger underneath both. That single, initially-unstated requirement flipped the decision to a standalone metering service both platforms called into, matching how every other shared capability in that org was already its own single-purpose service. Buying a generic FinOps vendor tool was never seriously on the table, since it would have needed as much integration work to understand each platform's specific provider/pricing model as building it ourselves, while giving up control over how budget-breach enforcement connected to each platform's own kill-switch."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "scalability-governance-tradeoffs/03-centralize-vs-federate-governance",
+    "weak_answer": {
+      "framework": "You should either centralize governance or let each team do its own thing. I'd probably centralize it.",
+      "applied_example": "One team handling it all seems simpler."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "framework": "This isn't a binary pick-a-side decision -- the real skill is drawing the line correctly within one system: centralize the decision surface, federate the implementation detail. What should centralize: the policy engine itself, the audit-trail format, the definition of what counts as high-risk, and the human-approval mechanism -- if every team invents its own version of 'does this need approval,' you get inconsistent risk tolerance and no way to answer 'what did any agent do last month' without querying N differently-shaped systems. What should stay federated: which specific actions a given team's agents are allowed to take, and the domain-specific logic for detecting risk in that team's own context, since a payments team's definition of high-risk (large refund amounts) is legitimately different from a content team's (PII exposure), and centralizing that specific judgment doesn't scale.",
+      "applied_example": "In an org I worked with, orchestration (routing work to specialist agents, which changed constantly as new capabilities were added) and governance (policy decisions, human approval, signed audit trails, which needed to stay stable and auditable) were split into genuinely separate systems rather than one merged framework. The instinctive design -- one big system that both routes work and enforces policy -- looks simpler at first but breaks exactly where this framework predicts: either governance changes get rushed through at orchestration's fast iteration speed, which is unsafe, or orchestration changes get slowed by governance's necessarily slower review cadence, which is its own cost. Keeping them separate let each evolve at the pace its own risk profile actually required."
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "scalability-governance-tradeoffs/04-build-vs-train-vs-finetune-foundation-model-strategy",
+    "weak_answer": {
+      "framework": "You can train your own model, fine-tune an existing one, or just use an API. Training your own is probably the best option if you can afford it.",
+      "applied_example": "Bigger companies usually train their own models."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "framework": "The right choice depends on what's actually being optimized for, not a default assumption that owning the model is inherently the more sophisticated answer. Training from scratch is only justified when the differentiation needed genuinely can't come from fine-tuning an existing model, or when owning the full model is itself the strategic asset -- a real position for a company whose business model is selling model access or safety research directly. Fine-tuning an open-weight model costs much less and gives real control over the specific behavior being tuned, but inherits the base model's capability ceiling and licensing terms -- this is the right call when the differentiation is in the tuning, not the base capability. Calling a vendor API (possibly more than one) is lowest upfront cost and fastest to ship, at the cost of inheriting that vendor's roadmap and pricing -- and a single vendor may not cover the full capability and cost surface a real product needs.",
+      "applied_example": "Every service I've built that calls an LLM at all has used a vendor API rather than a model trained or fine-tuned in-house, because the differentiation that work actually needed to prove was in the governance, orchestration, and cost-metering layers around the model call, not in model capability itself -- training or fine-tuning a model would have required data and compute resources genuinely out of scope for what those layers needed to demonstrate. Separately, a serving-layer simulation project I worked on modeled real inference-serving mechanics (batching, memory management) without needing real trained weights at all, since the goal was proving serving-architecture understanding cheaply, a distinct scope decision from the model-strategy question but motivated by the same resource-constraint reasoning."
+    },
+    "expected_strong_level": "principal"
   }
 ]

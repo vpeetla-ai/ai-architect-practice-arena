@@ -19,9 +19,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openaiAdapter } from "../lib/judge/openaiAdapter";
 import { anthropicAdapter } from "../lib/judge/anthropicAdapter";
-import type { JudgeAdapter, Level, Rubric, SectionedAnswer } from "../lib/judge/types";
+import type { Answer, BehavioralAnswer, JudgeAdapter, Level, Rubric, SectionedAnswer, TradeoffAnswer } from "../lib/judge/types";
 
-type CalibrationAnswer = Omit<SectionedAnswer, "high_level_design_image_url">;
+// One weak/strong pair per question, in whichever of the three Answer shapes
+// matches that question's rubric.format -- system_design's image URL field
+// is omitted since calibration answers never exercise the vision-input path.
+type CalibrationAnswer = Omit<SectionedAnswer, "high_level_design_image_url"> | BehavioralAnswer | TradeoffAnswer;
 
 interface CalibrationCase {
   question_id: string;
@@ -61,13 +64,13 @@ const RETRYABLE_ERROR_PATTERN = /fetch failed|ECONNRESET|ETIMEDOUT|network/i;
 async function runAdapterAgainstCase(
   adapter: JudgeAdapter,
   rubric: Rubric,
-  answer: SectionedAnswer,
+  answer: CalibrationAnswer,
   expected: Level,
   apiKey: string,
 ): Promise<{ pass: boolean; assessed: Level | "ERROR"; detail: string }> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const verdict = await adapter.judge(rubric, answer, apiKey);
+      const verdict = await adapter.judge(rubric, answer as Answer, apiKey);
       const pass = withinOneStep(verdict.assessed_level, expected);
       return {
         pass,
