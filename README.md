@@ -11,6 +11,10 @@ write a real answer to one of its 49 questions, and get graded by **both OpenAI 
 against that entry's own real Staff+/Principal rubric — using your own API key, which is never
 stored on or sent to our servers.
 
+System-design answers follow the playbook's Hello Interview six-step shape:
+**Requirements → Core entities → API / interface → Data Flow → High-level design → Deep dives**
+(HLD maps to functional requirements; deep dives to non-functional).
+
 ## Why two judges, and why bring-your-own-key
 
 Every playbook entry already encodes a specific, written rubric ("What's expected at each

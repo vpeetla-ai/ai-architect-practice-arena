@@ -34,6 +34,7 @@ const SECTION_LABEL: Record<string, string> = {
   requirements: "Requirements",
   core_entities: "Core Entities",
   api_interface: "API / Interface",
+  data_flow: "Data Flow",
   high_level_design: "High-Level Design",
   deep_dives: "Deep Dives",
   situation: "Situation",
@@ -50,6 +51,8 @@ const EMPTY_ANSWER_BY_FORMAT: Record<Rubric["format"], Record<string, string>> =
     requirements: "",
     core_entities: "",
     api_interface: "",
+    data_flow: "",
+    data_flow_mermaid: "",
     high_level_design_text: "",
     high_level_design_mermaid: "",
     high_level_design_image_url: "",
@@ -106,7 +109,27 @@ function renderSystemDesignSections(
         placeholder="The core API surface..."
       />
 
+      <h3>Data Flow</h3>
+      <p className="key-notice">
+        How data moves through the system &mdash; APIs and core business steps in sequence
+        (distinct from the component architecture below).
+      </p>
+      <textarea
+        value={answer.data_flow}
+        onChange={(e) => updateSection("data_flow", e.target.value)}
+        placeholder="Describe the happy-path sequence: client → API → services → response..."
+      />
+      <p className="key-notice">Optional sequence diagram (Mermaid) &mdash; renders live below:</p>
+      <textarea
+        value={answer.data_flow_mermaid}
+        onChange={(e) => updateSection("data_flow_mermaid", e.target.value)}
+        placeholder={"sequenceDiagram\n  Client->>API: POST /v1/...\n  API-->>Client: 200"}
+        style={{ minHeight: "120px", fontFamily: "monospace" }}
+      />
+      <MermaidDiagram source={answer.data_flow_mermaid} />
+
       <h3>High-Level Design</h3>
+      <p className="key-notice">Component architecture that satisfies the functional requirements.</p>
       <textarea
         value={answer.high_level_design_text}
         onChange={(e) => updateSection("high_level_design_text", e.target.value)}
@@ -116,7 +139,7 @@ function renderSystemDesignSections(
       <textarea
         value={answer.high_level_design_mermaid}
         onChange={(e) => updateSection("high_level_design_mermaid", e.target.value)}
-        placeholder={"flowchart LR\n  A --> B"}
+        placeholder={"graph TB\n  Client --> Gateway\n  Gateway --> Service"}
         style={{ minHeight: "120px", fontFamily: "monospace" }}
       />
       <MermaidDiagram source={answer.high_level_design_mermaid} />
@@ -145,6 +168,7 @@ function renderSystemDesignSections(
       )}
 
       <h3>Deep Dives</h3>
+      <p className="key-notice">Non-functional deep dives: latency, scale, failure, cost, security.</p>
       <textarea
         value={answer.deep_dives}
         onChange={(e) => updateSection("deep_dives", e.target.value)}

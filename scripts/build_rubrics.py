@@ -13,9 +13,10 @@ existing Practice Arena grader can discover them without a fourth UI format).
 Formats:
 
 - **system_design** (`ai-system-design/`, `general-system-design/`,
-  `cloud-architecture/`, 26 entries): the hellointerview-style shape —
-  Requirements, Core entities, API/interface, High-level design, numbered
-  Deep dive sections, and a level-criteria section.
+  `cloud-architecture/`, 26 entries): Hello Interview six-step shape —
+  Requirements, Core entities, API/interface, Data Flow, High-level design
+  (functional), numbered Deep dive sections (non-functional), and a
+  level-criteria section.
 - **behavioral** (`behavioral/`, 5 entries): STAR write-ups of Venkat's own
   real cases. Not re-answerable literally, so each entry now also has a
   generic, reusable "question, as it might actually be asked" section a
@@ -119,6 +120,7 @@ class SystemDesignRubric:
     requirements_summary: str
     core_entities_summary: str
     api_interface_summary: str
+    data_flow_summary: str
     high_level_design_summary: str
     reference_mermaid: str | None
     deep_dives_summary: str
@@ -287,6 +289,10 @@ def _parse_system_design_entry(relative_path: str) -> SystemDesignRubric:
     if api_interface is None:
         raise RubricParseError(f"{relative_path}: no '## API / interface' section found")
 
+    data_flow = _extract_section(text, "Data Flow")
+    if data_flow is None:
+        raise RubricParseError(f"{relative_path}: no '## Data Flow' section found")
+
     high_level_design = _extract_section(text, "High-level design")
     if high_level_design is None:
         raise RubricParseError(f"{relative_path}: no '## High-level design' section found")
@@ -313,6 +319,7 @@ def _parse_system_design_entry(relative_path: str) -> SystemDesignRubric:
         requirements_summary=requirements.strip(),
         core_entities_summary=core_entities.strip(),
         api_interface_summary=api_interface.strip(),
+        data_flow_summary=data_flow.strip(),
         high_level_design_summary=high_level_design.strip(),
         reference_mermaid=reference_mermaid,
         deep_dives_summary=deep_dives,

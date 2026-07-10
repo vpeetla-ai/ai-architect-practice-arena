@@ -132,8 +132,9 @@ real, correctly-parsed error text, the same behavior already verified locally.
 
 Phase 1 treated an answer as one flat textarea and covered 10 of the playbook's questions. Asked
 for the real, proper mock-interview experience, this phase (a) breaks the answer into the same
-five sections the playbook itself uses (Requirements, Core Entities, API/Interface, High-Level
-Design, Deep Dives), (b) extends coverage to all 26 questions in the three folders that share
+sections the playbook itself uses (originally five: Requirements, Core Entities, API/Interface,
+High-Level Design, Deep Dives — later aligned to six with Data Flow; see amendment below),
+(b) extends coverage to all 26 questions in the three folders that share
 this shape (`ai-system-design/` 13, `general-system-design/` 7, `cloud-architecture/` 6) — the
 remaining 9 (`behavioral/` 5, `scalability-governance-tradeoffs/` 4) are still deliberately
 deferred, being STAR- and framework-shaped rather than system-design-shaped, and (c) gives each
@@ -318,6 +319,15 @@ practice pages return 200; the OpenAI proxy still works correctly in production.
 - The anthropicAdapter malformed-JSON retry fix (above) has not yet been reconfirmed with a fresh
   live run — the one failure it targets was reproduced twice before the fix, not yet re-tested
   after it.
+
+## Amendment — Hello Interview six-step Data Flow, 2026-07-10
+
+The playbook aligned all 26 system-design entries to Hello Interview's six-step shape by
+inserting **Data Flow** between API/Interface and High-level design (sequence of how data moves;
+HLD remains component architecture for functional requirements; deep dives target NFRs). Practice
+Arena followed: `data_flow_summary` in the rubric parser, a sixth graded section in types /
+judge prompts / practice UI (optional sequence Mermaid), and `data_flow` fields on all 26
+system-design calibration weak/strong answers. Playbook submodule pinned to the six-step commit.
 
 ## References
 - [ai-architect-interview-playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook) — the rubric source of truth

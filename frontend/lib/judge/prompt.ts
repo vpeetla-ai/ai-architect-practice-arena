@@ -55,6 +55,9 @@ ${rubric.core_entities_summary}
 ## API / interface
 ${rubric.api_interface_summary}
 
+## Data Flow
+${rubric.data_flow_summary}
+
 ## High-level design
 ${rubric.high_level_design_summary}
 ${rubric.reference_mermaid ? `\nReal system's own diagram (for comparison, not the only acceptable design):\n\`\`\`mermaid\n${rubric.reference_mermaid}\n\`\`\`` : ""}
@@ -70,7 +73,7 @@ ${rubric.deep_dives_summary}
 
 Assess ONE overall level for the whole answer, based on which level's specific criteria it actually demonstrates -- not tone, length, or confidence. Classify at the HIGHEST level whose criteria are clearly satisfied; do not award a level for partial or vague gestures toward its criteria.
 
-Additionally, grade EACH of the five sections (Requirements, Core Entities, API/Interface, High-Level Design, Deep Dives) separately: for each, list specific strengths (what the candidate got right, referencing the rubric) and specific improvements (what a stronger answer would have included, referencing the rubric) -- concrete and actionable, not generic praise or criticism. A section left blank or missing should be flagged plainly as missing, not skipped.
+Additionally, grade EACH of the six sections (Requirements, Core Entities, API/Interface, Data Flow, High-Level Design, Deep Dives) separately: for each, list specific strengths (what the candidate got right, referencing the rubric) and specific improvements (what a stronger answer would have included, referencing the rubric) -- concrete and actionable, not generic praise or criticism. A section left blank or missing should be flagged plainly as missing, not skipped. Data Flow should show how requests/data move through APIs and core business steps (sequence), distinct from the High-Level Design component architecture. High-level design maps to functional requirements; deep dives map to non-functional ones.
 
 If a High-Level Design diagram image was provided (described below or shown to you directly), evaluate it as part of the High-Level Design section's strengths/improvements.
 
@@ -82,6 +85,7 @@ Respond with ONLY valid JSON matching this exact shape, no markdown fences, no c
     "requirements": { "strengths": string[], "improvements": string[] },
     "core_entities": { "strengths": string[], "improvements": string[] },
     "api_interface": { "strengths": string[], "improvements": string[] },
+    "data_flow": { "strengths": string[], "improvements": string[] },
     "high_level_design": { "strengths": string[], "improvements": string[] },
     "deep_dives": { "strengths": string[], "improvements": string[] }
   }
@@ -101,6 +105,10 @@ ${answer.core_entities || "(left blank)"}
 
 ## API / interface
 ${answer.api_interface || "(left blank)"}
+
+## Data Flow
+${answer.data_flow || "(left blank)"}
+${answer.data_flow_mermaid ? `\nSequence diagram (Mermaid source):\n\`\`\`mermaid\n${answer.data_flow_mermaid}\n\`\`\`` : ""}
 
 ## High-level design
 ${answer.high_level_design_text || "(left blank)"}

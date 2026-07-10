@@ -22,6 +22,7 @@ def test_every_system_design_rubric_has_the_sectioned_fields() -> None:
             continue
         assert rubric["core_entities_summary"].strip(), f"{rubric['question_id']}: empty core_entities_summary"
         assert rubric["api_interface_summary"].strip(), f"{rubric['question_id']}: empty api_interface_summary"
+        assert rubric["data_flow_summary"].strip(), f"{rubric['question_id']}: empty data_flow_summary"
         assert rubric["high_level_design_summary"].strip(), f"{rubric['question_id']}: empty high_level_design_summary"
         assert rubric["reference_mermaid"], f"{rubric['question_id']}: no mermaid diagram extracted"
         assert rubric["deep_dives_summary"].strip(), f"{rubric['question_id']}: empty deep_dives_summary"

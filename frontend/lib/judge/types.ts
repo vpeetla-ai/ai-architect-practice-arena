@@ -16,6 +16,7 @@ export interface SystemDesignRubric extends RubricBase {
   requirements_summary: string;
   core_entities_summary: string;
   api_interface_summary: string;
+  data_flow_summary: string;
   high_level_design_summary: string;
   reference_mermaid: string | null;
   deep_dives_summary: string;
@@ -59,6 +60,7 @@ export type SystemDesignSectionKey =
   | "requirements"
   | "core_entities"
   | "api_interface"
+  | "data_flow"
   | "high_level_design"
   | "deep_dives";
 export type BehavioralSectionKey = "situation" | "task" | "action" | "result" | "follow_up_response";
@@ -69,23 +71,33 @@ export type SectionKey = SystemDesignSectionKey | BehavioralSectionKey | Tradeof
  * the one shared source prompt-building, verdict-parsing, and the practice
  * page's results rendering all read from, so the three can't drift apart. */
 export const SECTION_KEYS_BY_FORMAT: Record<RubricFormat, readonly SectionKey[]> = {
-  system_design: ["requirements", "core_entities", "api_interface", "high_level_design", "deep_dives"],
+  system_design: [
+    "requirements",
+    "core_entities",
+    "api_interface",
+    "data_flow",
+    "high_level_design",
+    "deep_dives",
+  ],
   behavioral: ["situation", "task", "action", "result", "follow_up_response"],
   tradeoff: ["framework", "applied_example"],
 };
 
 /**
  * The candidate's answer, broken into the same sections the playbook itself
- * uses. High-Level Design gets two extra, optional diagram inputs: raw
- * Mermaid source (rendered live in the browser, and read as plain text by
- * the judges -- no vision API needed for this path) and/or an image URL for
- * other tools (Excalidraw exports, screenshots), sent to the judges as a
- * real vision input when the provider supports it.
+ * uses (Hello Interview six-step for system design). High-Level Design gets
+ * two extra, optional diagram inputs: raw Mermaid source (rendered live in
+ * the browser, and read as plain text by the judges -- no vision API needed
+ * for this path) and/or an image URL for other tools (Excalidraw exports,
+ * screenshots), sent to the judges as a real vision input when the provider
+ * supports it. Data Flow may include an optional sequence-diagram Mermaid.
  */
 export interface SectionedAnswer {
   requirements: string;
   core_entities: string;
   api_interface: string;
+  data_flow: string;
+  data_flow_mermaid?: string;
   high_level_design_text: string;
   high_level_design_mermaid: string;
   high_level_design_image_url?: string;

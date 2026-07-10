@@ -6,6 +6,7 @@ const EMPTY_SECTIONS = {
   requirements: { strengths: [], improvements: [] },
   core_entities: { strengths: [], improvements: [] },
   api_interface: { strengths: [], improvements: [] },
+  data_flow: { strengths: [], improvements: [] },
   high_level_design: { strengths: [], improvements: [] },
   deep_dives: { strengths: [], improvements: [] },
 } satisfies Record<string, SectionFeedback>;

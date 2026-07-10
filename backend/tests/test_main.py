@@ -28,6 +28,7 @@ def test_rubric_endpoint_returns_full_content_for_known_question() -> None:
     assert set(body["level_criteria"].keys()) == {"mid", "senior", "staff_plus", "principal"}
     assert body["core_entities_summary"]
     assert body["api_interface_summary"]
+    assert body["data_flow_summary"]
     assert body["high_level_design_summary"]
     assert body["reference_mermaid"]
     assert body["deep_dives_summary"]

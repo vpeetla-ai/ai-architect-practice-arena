@@ -5,6 +5,7 @@
       "requirements": "Users send a prompt and get a completion back. We should support multiple models.",
       "core_entities": "A request has a prompt and a model name. A server holds the model in memory.",
       "api_interface": "POST /generate { prompt, model } -> { text }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "A load balancer sends requests to a pool of servers, each running a copy of the model. Each server processes one request at a time.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd add more servers if it gets slow."
@@ -14,6 +15,7 @@
       "requirements": "Stream completions token-by-token, support fast/cheap and slow/high-quality model variants behind one API, and separate interactive (low TTFT, target ~200ms P50) from batch (throughput-optimized) traffic so a long batch job never starves interactive latency.",
       "core_entities": "Request (prompt, model, priority tier), Sequence (a request's in-flight generation state plus the KV cache blocks it owns), KV cache block (fixed-size chunk of GPU memory, owned by one sequence or shared via prefix caching), Model replica (loaded weights, tensor-parallel shards).",
       "api_interface": "POST /v1/completions { model, prompt, max_tokens, stream, priority } -> stream of { token, finish_reason }.",
+      "data_flow": "Happy path for an interactive completion (functional), then where NFRs show up (queueing, KV reuse). Sequence: C\u2192GW (POST /v1/chat/completions (stream)); GW\u2192Adm (auth + priority=interactive); Adm\u2192Sch (enqueue / admit); Sch\u2192GPU (continuous batch step); GPU\u2192Sch (tokens); Sch\u2192C (SSE token stream).",
       "high_level_design_text": "A router classifies requests by model and priority, then a scheduler admits sequences into the next forward pass. The single highest-leverage decision is continuous batching -- folding new sequences into the running batch every decode step instead of waiting for a static batch to finish -- which is the difference between 20-30% and 70-90%+ GPU utilization.",
       "high_level_design_mermaid": "flowchart LR\n    C[Client] --> LB[Router]\n    LB --> Q[Priority queue]\n    Q --> SCHED[Scheduler]\n    SCHED --> ENG1[Replica 1]\n    SCHED --> ENG2[Replica 2]",
       "deep_dives": "KV cache, not weights, is usually the binding memory constraint at high concurrency -- for a 70B model it can exceed the weights' own footprint at long context. PagedAttention manages this like OS virtual memory: fixed-size blocks allocated on demand, with copy-on-write for shared prefixes, and an explicit preemption policy (pick a victim, swap its KV cache to CPU or recompute later) when memory runs out. Separately, GPU-hours are the dominant cost line, so real per-request token accounting feeding a budget-enforcement gate is a first-class design input, not a monitoring dashboard bolted on after launch -- and the cost/quality trade-off (quantization, speculative decoding, smaller model + more parallelism) needs concrete numbers, not 'it depends.'"
@@ -26,6 +28,7 @@
       "requirements": "Users ask a question and get an answer with sources. We embed documents and search for similar ones.",
       "core_entities": "A document, a chunk, an embedding, a query.",
       "api_interface": "POST /ask { query } -> { answer, sources }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "We chunk documents, embed them into a vector database, and at query time embed the question and find the closest chunks, then pass them to the LLM as context.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd use a bigger vector database if search gets slow."
@@ -35,6 +38,7 @@
       "requirements": "Retrieval must respect access control (a user should never see chunks they're not authorized to read), support hybrid lexical + semantic retrieval, and every claim in the generated answer must trace to a specific citation with an explicit grounding check.",
       "core_entities": "Chunk (content, content_hash, ingested_at, source_uri, access policy), Embedding, Query, Citation (chunk reference the answer actually used), AccessPolicy (per-user/group read scope).",
       "api_interface": "POST /ask { query, principal } -> { answer, citations: [{chunk_id, ...}], grounded: bool }",
+      "data_flow": "Two flows: ingest (write path) and answer (read path). Access filter runs **before** ranking on the answer path. Sequence: U\u2192GW (POST /v1/documents); GW\u2192In (validate contract); In\u2192Idx (chunk + embed + upsert); U\u2192GW (POST /v1/answer); GW\u2192Ans (Principal from JWT); Ans\u2192Idx (access-filtered retrieve).",
       "high_level_design_text": "The design decision that matters most: access control is enforced at candidate generation, before ranking -- not as a post-filter. Ranking first and filtering after leaks information through ranking position, and wastes retrieval budget scoring documents that get thrown away anyway.",
       "high_level_design_mermaid": "flowchart LR\n    Q[Query] --> AUTH[Access policy filter]\n    AUTH --> RETRIEVE[Hybrid retrieval: lexical + semantic]\n    RETRIEVE --> RANK[Rank authorized candidates]\n    RANK --> LLM[Generate + cite]\n    LLM --> GUARD[Grounding check]",
       "deep_dives": "Hybrid retrieval (BM25 lexical + embedding similarity, combined explicitly) beats either alone -- embeddings miss exact-match/trending signals. Real ingestion lineage (content_hash, ingested_at persisted per chunk) matters because a documented real bug showed object reconstruction during a later pipeline stage can silently drop lineage fields to their defaults, breaking 'what did this answer actually cite' auditability. Grounding needs enforcement at the output stage too: every claim should trace to a specific citation, with an explicit check flagging ungrounded or hallucinated claims rather than assuming retrieval implies grounding."
@@ -47,6 +51,7 @@
       "requirements": "The agent should be able to call tools like search and calculator to answer questions.",
       "core_entities": "An agent, a tool, a task.",
       "api_interface": "POST /run { task } -> { result }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "The agent loops: decide which tool to call, call it, get the result, decide what to do next, until it has an answer.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd add more tools as needed."
@@ -56,6 +61,7 @@
       "requirements": "Orchestration (deciding what to do next) must be a separate layer from governance (deciding whether an action is allowed) -- governance can't live inside the agent's own reasoning, because a prompt-injected or simply mistaken agent will confidently request the wrong action. Every tool call needs an allow-list per tool/agent identity, a human-approval gate above a stated risk threshold, and a kill-switch that can halt an in-flight multi-step plan.",
       "core_entities": "Agent identity, Tool (with an allow-list scope), Plan (a sequence of intended actions), Governance decision (allow/deny/require-approval per call), Kill-switch state.",
       "api_interface": "POST /agent/run { task, agent_identity } -> { plan_id }; every tool call inside the plan routes through POST /governance/authorize { agent_identity, tool, args } -> { allowed, requires_approval }.",
+      "data_flow": "Mission plan \u2192 agent work \u2192 gateway authorize \u2192 (optional HITL) \u2192 execute with short-lived token. Sequence: U\u2192O (POST /v1/missions); O\u2192A (assign step); A\u2192G (authorize(tool, args)); G\u2192A (execution_token); A\u2192T (execute(token)); T\u2192O (result).",
       "high_level_design_text": "Orchestration and governance are two distinct services: the orchestrator decides which tool/sub-agent to call next; the governance layer independently decides whether that specific call is allowed, without trusting the orchestrator's own judgment as the enforcement boundary.",
       "high_level_design_mermaid": "flowchart LR\n    AGENT[Orchestrator] --> GATE[Governance gate]\n    GATE -->|allowed| TOOL[Tool execution]\n    GATE -->|needs approval| HUMAN[Human approval]\n    GATE -->|denied| REJECT[Rejected]\n    KILL[Kill-switch] -.->|halts in-flight plan| AGENT",
       "deep_dives": "Agent-to-agent delegation should be a first-class case -- one agent discovering and calling another's capability through a real discovery mechanism (an agent-card-style endpoint), not just in-process function calls, since that's the shape real multi-agent systems take once more than one team builds agents independently. The kill-switch specifically needs to halt an in-flight multi-step plan, not just block the next single call -- a governance gate that only checks the next action can't stop a plan that's already mid-execution when a budget or safety threshold breaches."
@@ -68,6 +74,7 @@
       "requirements": "Store features so both training and serving can use them.",
       "core_entities": "A features table with entity ID and value columns.",
       "api_interface": "GetFeatures(entity_id) -> current feature values.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "One shared database serves both training queries and live serving lookups.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd add a cache if lookups get slow."
@@ -77,6 +84,7 @@
       "requirements": "Support online serving (low-latency lookup of current feature values) and offline training (point-in-time-correct historical feature values, not just the latest value) from one shared feature definition, to avoid training-serving skew.",
       "core_entities": "Feature definition, Feature value (entity_id, timestamp, value), Training dataset snapshot (a point-in-time join across many features), Online feature cache, Corpus/feature snapshot hash for reproducibility.",
       "api_interface": "GetOnlineFeatures(entity_id) for serving; GetHistoricalFeatures(entity_ids, timestamps) for training, joining each feature as-of its specific timestamp, not the latest value.",
+      "data_flow": "Offline materialization feeds training datasets; online path serves low-latency feature vectors at inference. Sequence: P\u2192M (new events / batch); M\u2192Off (point-in-time tables); M\u2192On (serve features); Tr\u2192Off (build training dataset); Inf\u2192On (GET online-features).",
       "high_level_design_text": "Separate an online store (low-latency KV store) from an offline store (columnar, supports point-in-time joins), fed by the same feature computation logic so training and serving can never silently diverge.",
       "high_level_design_mermaid": "flowchart LR\n    RAW[Raw events] --> COMPUTE[Feature computation]\n    COMPUTE --> ONLINE[(Online store)]\n    COMPUTE --> OFFLINE[(Offline store, point-in-time)]\n    SERVE[Serving] --> ONLINE\n    TRAIN[Training] --> OFFLINE",
       "deep_dives": "Point-in-time correctness is the core hard problem: naively joining 'latest value' for each feature during training leaks future information the model wouldn't have had at prediction time. Reproducibility needs to be a content-hash contract over both the transformation logic and the input snapshot, not just 'we track lineage' as a policy statement -- a documented real bug showed object reconstruction during a pipeline stage can silently drop lineage fields to defaults. Freshness vs. compute cost is a real trade-off mapped per feature category: event-driven incremental computation for frequently-changing features, scheduled batch recomputation for expensive slow-changing ones."
@@ -89,6 +97,7 @@
       "requirements": "Check user input and model output for bad content and block it.",
       "core_entities": "A message, a moderation result.",
       "api_interface": "POST /moderate { text } -> { blocked: bool }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Run every message through a classifier before and after the LLM call, and block anything flagged.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd tune the classifier threshold if it's too strict or too loose."
@@ -98,6 +107,7 @@
       "requirements": "Redact sensitive input (PII, payment tokens) before it reaches the model, flag destructive-action requests for human approval rather than blocking outright, and validate that every output claim is grounded in an actual citation, not fabricated.",
       "core_entities": "GuardrailResult (allowed, flags, redacted_text), Input redaction rule, Destructive-action pattern, Citation set, Answer (with grounded flag and risk_flags).",
       "api_interface": "inspect_input(text) -> GuardrailResult; validate_output(answer, context) -> Answer with grounded: bool and risk_flags.",
+      "data_flow": "Sync path for chat; async path for media. Human review is a branch, not a silent drop. Sequence: App\u2192Mod (POST /v1/moderate); Mod\u2192Ens (score policies); Ens\u2192App (decision + policy_version); Ens\u2192Q (enqueue); Q\u2192App (decision=review).",
       "high_level_design_text": "Two distinct guardrail passes: input inspection (redact PII/payment data, flag destructive-action requests for human approval) and output validation (check every claim traces to an actual citation in the retrieved context, flag missing or unknown citations).",
       "high_level_design_mermaid": "flowchart LR\n    IN[User input] --> REDACT[Redact PII/payment]\n    REDACT --> FLAG[Flag destructive actions]\n    FLAG --> LLM[Model call]\n    LLM --> VALIDATE[Validate citations]\n    VALIDATE --> OUT[Grounded answer or flagged]",
       "deep_dives": "The real, working guardrail split is input redaction vs. output grounding validation -- not a single upfront/downstream classifier. Destructive-action requests (delete, refund, wire, disable account) should route to human-approval flags, not outright blocking, since the action might be legitimate. Output validation checks which citation IDs the answer actually references against the ones it was given -- missing citations or references to unknown citation IDs are both real, distinct failure modes worth flagging separately, not collapsed into one generic 'ungrounded' flag. Fail-open vs. fail-closed is a per-category decision, not one global policy: a payment or destructive-action category should fail closed (block and escalate on guardrail-service downtime), while a low-risk tone/style category can fail open, since blocking all traffic on a guardrail outage is its own outage. The human review queue is a first-class part of the system, not a fallback bolted onto the automated pipeline -- it needs its own SLA per risk category, a UI that shows reviewers the redacted input and the specific flag reason rather than just 'flagged', and a feedback loop where reviewer decisions retrain the classifier, otherwise the queue silently backs up and becomes the real bottleneck nobody designed for."
@@ -110,6 +120,7 @@
       "requirements": "Return relevant items for a user's query or profile.",
       "core_entities": "An item, a user, an embedding.",
       "api_interface": "GET /recommendations?user_id= -> { items }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Embed all items and the query, then return the closest matches by similarity search.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd retrain the embedding model periodically."
@@ -119,6 +130,7 @@
       "requirements": "Return a ranked list drawn from hundreds of millions to billions of items within a tens-of-milliseconds budget, support multiple modalities (text/image/video) with a unified relevance signal, and include diversity/exploration so pure engagement-maximization doesn't crowd out everything else.",
       "core_entities": "Item (modality-specific embeddings, metadata), User profile, Candidate set (retrieved via ANN index), Ranking score, Exploration budget.",
       "api_interface": "GET /recommendations?user_id=&limit= -> { items: [{item_id, score}] }",
+      "data_flow": "Query encoding \u2192 multi-channel retrieval \u2192 L1 merge \u2192 L2 rank \u2192 feedback loop. Sequence: C\u2192S (POST /v1/search); S\u2192ANN (dense candidates); S\u2192Lex (sparse / filters); ANN\u2192S (ids); Lex\u2192S (ids); S\u2192R (L1 merge + L2 score).",
       "high_level_design_text": "A two-stage pipeline: cheap, high-recall candidate generation via an ANN index over the full catalog, followed by an expensive, high-precision ranking model over the small candidate set -- the same retrieve-then-rank shape as RAG, generalized.",
       "high_level_design_mermaid": "flowchart LR\n    Q[User request] --> GEN[Candidate generation: ANN index]\n    GEN --> MERGE[Merge multiple sources]\n    MERGE --> RANK[Ranking model]\n    RANK --> DIV[Diversity/exploration pass]",
       "deep_dives": "At billion-item scale, brute-force distance computation is infeasible -- an approximate nearest-neighbor index (IVF-PQ or HNSW) is required, with recall/latency/memory as three independently tunable axes against a concrete target (e.g., recall@100 above 90% at p99 under 20ms), not a black box. Position bias is the real, measurable mechanism behind engagement feedback loops -- higher-ranked items get more clicks regardless of true relevance -- corrected via inverse-propensity weighting or randomized exploration slices in training data, not just an exploration budget at serving time."
@@ -131,6 +143,7 @@
       "requirements": "Log what the model does and check quality with a test set.",
       "core_entities": "A log entry, a test case.",
       "api_interface": "POST /eval/run -> { pass_rate }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Run a set of test prompts through the model periodically and check the outputs look reasonable.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd add more test cases over time."
@@ -140,6 +153,7 @@
       "requirements": "Every production call should produce an async trace (inputs, outputs, intermediate steps) without adding latency to the request path, and a versioned golden suite should be runnable as a real CI merge gate producing pass/fail, not just a manual quality check.",
       "core_entities": "Trace (spans per step, cost, latency), Eval suite (versioned, locked test cases), Eval case (input + expect block), Eval run (pass/fail per case against a specific target).",
       "api_interface": "POST /eval/run { suite_id, target_base_url } -> { results: [{case_id, passed, detail}] }; GET /traces?run_id= -> full trace tree.",
+      "data_flow": "CI triggers an eval run against golden fixtures; failures deep-link to production-like traces. Sequence: CI\u2192Gate (POST /v1/eval-runs); Gate\u2192Run (start); Run\u2192Gold (load cases); Run\u2192Tr (attach / compare spans); Run\u2192Gate (scores + failed_cases); Gate\u2192CI (pass/fail).",
       "high_level_design_text": "Tracing (what actually happened in production) and evaluation (does the system still pass known cases) are related but distinct systems -- a common weak design conflates them into one logging system that does neither job well.",
       "high_level_design_mermaid": "flowchart LR\n    PROD[Production request] -.->|async| TRACE[(Trace store)]\n    SUITE[Golden suites] --> RUNNER[Scorer]\n    RUNNER --> TARGET[Real service under test]\n    RUNNER --> GATE[CI merge gate]",
       "deep_dives": "Fixtures that validate (schema-correct) are a different claim than fixtures that actually gate a real build -- only real execution against a live target proves the second one; a real, disclosed example found a genuine fixture bug on its very first real execution. Cost should be a first-class evaluation dimension alongside quality, not a separate finance report -- a model change that improves quality but doubles cost per request is a trade-off, not an unambiguous win, and needs to be visible in the same evaluation output."
@@ -152,6 +166,7 @@
       "requirements": "Fine-tune the model on labeled data and then align it with human preferences.",
       "core_entities": "A checkpoint, a preference pair.",
       "api_interface": "POST /train -> { checkpoint_id }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Run supervised fine-tuning, then run RLHF on top, and deploy the final model.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd monitor training loss to make sure it's converging."
@@ -161,6 +176,7 @@
       "requirements": "Every training run must produce a versioned, independently evaluable checkpoint (not just a final model), support rollback to a previous checkpoint on eval/safety regression, and treat multi-node fault tolerance and cost attribution as first-class, not afterthoughts.",
       "core_entities": "SFT checkpoint, Preference dataset (with provenance: human vs. AI judge), Reward model (independently versioned and evaluated), Policy checkpoint.",
       "api_interface": "POST /training/sft -> checkpoint_id; POST /training/reward-model -> reward_model_id + eval_scores; POST /training/rlhf -> new_checkpoint_id + eval_scores.",
+      "data_flow": "Dataset + base model \u2192 training workers \u2192 eval gate \u2192 promote to registry (budget-aware). Sequence: Op\u2192Or (POST /v1/training-jobs); Or\u2192W (schedule); W\u2192Or (metrics / checkpoints); Or\u2192Ev (run suite); Ev\u2192Or (pass/fail); Op\u2192Or (POST promote).",
       "high_level_design_text": "The pipeline is a staged sequence with an independent evaluation gate at each stage, not one monolithic job -- a bug in the reward model (the middle stage) needs to be caught before it's baked into an expensive-to-retrain policy model.",
       "high_level_design_mermaid": "flowchart LR\n    SFT[SFT] --> SFTCKPT[SFT checkpoint]\n    PREF[Preference data] --> RM[Reward model]\n    RM --> RMEVAL[Reward model eval]\n    SFTCKPT --> RLHF[RLHF/DPO]\n    RMEVAL --> RLHF\n    RLHF --> GATE[Eval + safety gate]",
       "deep_dives": "Reward hacking (the policy exploiting a stable reward model's known weakness) is distinct from reward model staleness (the reward model's own reliability silently degrading as the policy's output distribution drifts from what it was validated against) -- the fix for staleness is periodic reward-model refresh against the current policy's actual outputs, not a one-time upfront validation. Real GPU-hour cost attribution per run/stage needs to be visible in real time, the same discipline as real per-call cost metering elsewhere in the stack, not discovered after the fact in a finance review."
@@ -173,6 +189,7 @@
       "requirements": "Multiple customers share the platform, each with their own API key.",
       "core_entities": "A tenant, an API key.",
       "api_interface": "POST /v1/completions with an API key header.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Each tenant gets an API key and a rate limit; requests are routed to a shared pool of servers.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd increase the rate limit for bigger customers."
@@ -182,6 +199,7 @@
       "requirements": "Support per-tenant customization (fine-tunes, system prompts) without a fully separate deployment per tenant, and ensure no tenant's traffic pattern degrades another's latency -- which is a harder problem here than typical multi-tenancy because GPU batching means tenants can share the same physical compute at the request level.",
       "core_entities": "Tenant (API key, TPM/RPM quota), Model variant (base model + tenant customization layer), Capacity tier (shared vs. dedicated/PTU-style), Quota ledger.",
       "api_interface": "POST /v1/completions with tenant API key -> 200 or 429 with retry_after, quota checked before scheduling, not after.",
+      "data_flow": "Control plane sets quotas/keys; data plane enforces on every inference call and meters usage. Sequence: Adm\u2192CP (PUT quotas / create keys); T\u2192GW (POST completions (tenant key)); GW\u2192GW (enforce RPM/TPM); GW\u2192Pool (route); Pool\u2192T (response); GW\u2192CP (usage events).",
       "high_level_design_text": "Quota enforcement happens at the gate, before scheduling, not as post-hoc billing reconciliation -- a rejected request should never consume GPU capacity.",
       "high_level_design_mermaid": "flowchart LR\n    T1[Tenant A] --> GATE[Auth + quota gate]\n    T2[Tenant B] --> GATE\n    GATE -->|within quota| SCHED[Shared GPU scheduler]\n    GATE -->|dedicated tier| DED[Dedicated pool]\n    GATE -->|over quota| REJECT[429]",
       "deep_dives": "Per-tenant rate limits alone don't fully solve isolation -- continuous batching multiplexes multiple tenants' requests into the same GPU forward pass, so isolation has to be reasoned about inside the scheduler itself, not just at the API gateway; dedicated capacity tiers exist specifically for tenants needing an isolation guarantee stronger than quota alone provides. Customization should be expressed as a layer (a fine-tuned adapter, an injected system prompt) applied at request time over shared base weights, not a fully forked deployment per tenant -- that doesn't scale operationally past a handful of tenants."
@@ -194,6 +212,7 @@
       "requirements": "Run the agent's code in a container so it can't harm the host.",
       "core_entities": "A container, a task.",
       "api_interface": "POST /execute { code } -> { output }",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Each task gets its own Docker container that's destroyed after it finishes, with limited network access.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd block access to sensitive files."
@@ -203,6 +222,7 @@
       "requirements": "Code execution must be isolated even from adversarial code (standard containers share the host kernel, so a container escape compromises the host directly), and the system must defend against prompt injection -- an instruction hidden in fetched content that tries to hijack the agent's next action, which is a fundamentally different threat from validating direct user input.",
       "core_entities": "Sandbox instance (isolated environment, torn down after the task), Tool call (checked against an allow-list before execution), Tool result (treated as untrusted input), Policy (allow-list of commands/network/filesystem).",
       "api_interface": "POST /agent/execute { task, allowed_tools, policy_id } -> sandbox_id; POST /sandbox/{id}/tool_call -> result or denied.",
+      "data_flow": "Gateway mints sandbox \u2192 exec under allowlisted network/resources \u2192 terminate + audit. Sequence: G\u2192M (POST /v1/sandboxes); M\u2192G (sandbox_id); G\u2192S (POST exec (execution_token)); S\u2192G (stdout/stderr/exit); G\u2192M (terminate); M\u2192G (audit events).",
       "high_level_design_text": "Every tool call passes through an allow-list check before execution, and every tool result flows back into the agent's context as untrusted input, scanned the same as the original tool call, not accepted as trusted reasoning context.",
       "high_level_design_mermaid": "flowchart TB\n    AGENT[Agent] --> CALL[Tool call]\n    CALL --> POLICY[Allow-list check]\n    POLICY -->|denied| REJECT[Rejected]\n    POLICY -->|allowed| SANDBOX[gVisor/microVM sandbox]\n    SANDBOX --> RESULT[Tool result]\n    RESULT -->|untrusted| AGENT",
       "deep_dives": "gVisor (intercepts syscalls in user space) or a full microVM (Firecracker-style, hardware-level virtualization) are real isolation choices beyond a standard container -- Anthropic's own documented choice for Claude Code is gVisor, trading full-VM overhead for a smaller attack surface than a shared kernel. The core design principle: even with perfect sandboxing, prompt injection attacks the agent's reasoning, not the execution environment -- the sandbox's allow-list, not the agent's own judgment, must be the actual enforcement boundary, because a successful injection means the agent's judgment is exactly what's compromised."
@@ -215,6 +235,7 @@
       "requirements": "Run simple requests on the device and send complex ones to the cloud.",
       "core_entities": "An on-device model, a cloud model.",
       "api_interface": "LocalInfer(request) or CloudInfer(request), chosen by request complexity.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "A small model on the device handles easy requests; anything else is sent to a cloud model.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd make the cloud tier faster if latency is an issue."
@@ -224,6 +245,7 @@
       "requirements": "Simple, latency-sensitive requests should work fully offline on-device; requests exceeding on-device capability should transparently escalate to a cloud tier whose privacy guarantees are as strong as architecturally possible -- not just encrypted in transit, but designed so the cloud tier can't retain or inspect the request at all.",
       "core_entities": "On-device model (small, quantized), Escalation classifier (fast, on-device), Cloud tier (ephemeral, no-retention), Session context.",
       "api_interface": "LocalInfer(request, context) -> result or escalate; CloudInfer(request, context, privacy_policy: ephemeral_no_retention) -> result.",
+      "data_flow": "Device pulls signed model package; inference stays on-device unless privacy-scoped cloud fallback is invoked. Sequence: App\u2192Man (GET manifest); App\u2192CDN (download-ticket + fetch); CDN\u2192RT (signed model); App\u2192RT (infer); RT\u2192FB (POST fallback/cloud-infer); FB\u2192App (result (no_store)).",
       "high_level_design_text": "Escalating to the cloud tier is not the same privacy trade-off as a typical cloud API call -- the design goal is that the cloud tier processes the request and discards it, with no operator visibility into content, as close to on-device guarantees as architecturally possible (Apple's real, published Private Cloud Compute design).",
       "high_level_design_mermaid": "flowchart LR\n    REQ[Request] --> CLASSIFY[On-device classifier]\n    CLASSIFY -->|within capability| LOCAL[On-device model]\n    CLASSIFY -->|exceeds capability| CLOUD[Cloud tier: ephemeral, no retention]",
       "deep_dives": "A no-retention cloud tier is an architectural guarantee, not a policy statement -- it requires verifiable non-persistence by construction (no durable storage the request ever touches), no privileged operator access path, and ideally cryptographic attestation of what code is actually running, not just 'we delete it after 30 days.' The escalation classifier's boundary should be trained against the on-device model's actual known failure modes (multi-step reasoning, world-knowledge gaps), not a generic token-count threshold, since a crude proxy escalates the wrong requests."
@@ -236,6 +258,7 @@
       "requirements": "Track where training data came from in case there's a legal question later.",
       "core_entities": "A data source, a training example.",
       "api_interface": "GET /provenance?source= -> list of examples from that source.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Tag each training example with its source when we ingest it.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd remove a source from future training runs if there's a legal issue."
@@ -245,6 +268,7 @@
       "requirements": "Every training example needs source, license, and consent status tracked through the full pipeline (ingestion, dedup, filtering, synthetic augmentation) without being silently dropped, and the system needs to support answering 'what did this model train on' as a real, auditable query, not a research project.",
       "core_entities": "Source (license terms, consent/opt-in status), Training example (source, content-hash), Corpus snapshot (versioned, immutable, linked to the training run that used it), Provenance query.",
       "api_interface": "POST /corpus/ingest { source_id, examples } -> rejects examples missing required consent/license metadata; GET /provenance/query?source_id= -> training examples + models trained.",
+      "data_flow": "Register dataset \u2192 provenance \u2192 dual approval \u2192 training admission checks lineage; takedowns propagate exclusions. Sequence: D\u2192Reg (POST /v1/datasets + provenance); Reg\u2192L (pending_review); L\u2192Reg (approve); Gate\u2192Reg (lineage query for model job); TD\u2192Reg (takedown URL); Reg\u2192Gate (updated blocklists).",
       "high_level_design_text": "Provenance is enforced at ingestion (reject data missing required metadata, don't accept-and-hope-to-reconstruct-later) and preserved end-to-end via a corpus-snapshot-to-model linkage.",
       "high_level_design_mermaid": "flowchart LR\n    RAW[Raw sources] --> GATE[Ingestion gate: license/consent check]\n    GATE -->|missing metadata| REJECT[Rejected]\n    GATE -->|passes| CORPUS[(Versioned corpus snapshot)]\n    CORPUS --> TRAIN[Training run]\n    TRAIN --> MODEL[Model, linked to snapshot]",
       "deep_dives": "The harder question a corpus-removal answer misses: can you prove an already-trained model doesn't retain extractable traces of removed data? Membership-inference testing (probing the model for verbatim/near-verbatim reproduction of disputed-source samples) is the real, concrete mechanism -- corpus-level removal alone doesn't resolve exposure already baked into a shipped model. Synthetic (model-generated) training data needs its own provenance dimension distinct from human-authored data, tracking generation lineage, given real model-collapse research on recursively training on prior models' output."
@@ -257,6 +281,7 @@
       "requirements": "Save the agent's progress periodically so it can resume after a crash.",
       "core_entities": "A task, a checkpoint.",
       "api_interface": "POST /tasks -> task_id; GET /tasks/{id}/status -> status.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Save the conversation history to a database periodically and reload it on restart.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd check a log before repeating an action to avoid duplicates."
@@ -266,6 +291,7 @@
       "requirements": "A long-running agent must survive a process restart mid-task without repeating already-completed side effects, support human-in-the-loop pauses lasting minutes to days without holding a compute resource open, and provide mid-flight observability so a human can inspect and cancel an in-progress task safely.",
       "core_entities": "Task (status, execution history), Checkpoint (durable snapshot sufficient to resume exactly), Side-effect record (keyed by idempotency ID), Human checkpoint (open-ended pause, no held resource).",
       "api_interface": "POST /tasks -> task_id; POST /tasks/{id}/resume_with_human_input; POST /tasks/{id}/cancel.",
+      "data_flow": "Run starts, checkpoints after nodes, interrupts for HITL, resumes from checkpoint \u2014 cancel is first-class. Sequence: U\u2192API (POST /v1/runs); API\u2192O (start graph); O\u2192CK (save checkpoint); O\u2192API (interrupted (HITL)); API\u2192U (status=interrupted); U\u2192API (resume(approve)).",
       "high_level_design_text": "The real, robust pattern is durable-execution-style: reasoning code re-executes from the top on every resume, but every side-effecting operation is wrapped so its result -- not just whether it ran -- is durably recorded, and replay returns the cached result instantly instead of re-running it.",
       "high_level_design_mermaid": "flowchart LR\n    START[Task starts] --> STEP[Reasoning step]\n    STEP --> EFFECT{Side effect?}\n    EFFECT -->|yes| CHECK[Check side-effect log]\n    CHECK --> EXEC[Execute + record]\n    EFFECT -->|no| CKPT[Checkpoint]\n    EXEC --> CKPT\n    CKPT --> MORE{More steps?}\n    MORE -->|human input needed| PAUSE[Pause, no compute held]",
       "deep_dives": "The naive full-conversation-replay approach is unsafe the moment the agent takes real side effects, since it re-executes every tool call including consequential ones -- the fix is the durable-execution log itself acting as the checkpoint, not a single frozen-state blob. Human-in-the-loop pauses need to be represented as a fully durable, resource-free state (a database record awaiting an external event) since a pause might last days, and holding a process or locked resource open that long is a real operational hazard."
@@ -278,6 +304,7 @@
       "requirements": "Make sure we have enough GPUs for training and serving.",
       "core_entities": "A GPU, a workload.",
       "api_interface": "POST /capacity/request { gpu_count } -> allocation.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Reserve some GPU capacity and use on-demand instances when we need more.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd buy more reserved capacity if we keep running out."
@@ -287,6 +314,7 @@
       "requirements": "Forecast GPU-hour demand separately for training (lumpy, discrete large jobs) and serving (steadier, traffic-driven), and decide procurement mix (reserved, on-demand/spot, secondary provider) per workload with graceful degradation when a pool is exhausted, since reserved capacity has real weeks-to-months lead time.",
       "core_entities": "Workload (demand profile, priority), Capacity pool (reserved/on-demand/spot, cost per GPU-hour), Allocation (bound to a pool with a fallback chain), Utilization record.",
       "api_interface": "POST /capacity/request { workload_id, gpu_hours_forecast, priority } -> { allocation, fallback_pools, estimated_cost }; GET /capacity/utilization -> reserved/consumed/idle hours.",
+      "data_flow": "Forecast \u2192 reservation request \u2192 dual approval \u2192 provider submit \u2192 utilization feeds the next forecast. Sequence: F\u2192R (gap_units); R\u2192A (pending_approval); A\u2192R (approve); R\u2192C (submit reservation); U\u2192F (util + waste signals).",
       "high_level_design_text": "A forecaster drives procurement ahead of demand, a scheduler binds workloads against whatever pools exist with an explicit fallback chain (reserved -> on-demand -> secondary provider), and real utilization feeds back into the next forecast.",
       "high_level_design_mermaid": "flowchart LR\n    FCST[Forecaster] --> PLANNER[Procurement planner]\n    PLANNER --> RES[Reserved]\n    PLANNER --> OND[On-demand/spot]\n    PLANNER --> SEC[Secondary provider]\n    WORK[Workload] --> SCHED[Scheduler]\n    SCHED --> RES\n    SCHED -->|exhausted| OND\n    OND -->|exhausted| SEC",
       "deep_dives": "This is a portfolio decision across at least three tiers, not a single reserved-vs-on-demand binary -- serving skews reserved (predictable, can't tolerate preemption), training experimentation skews spot (tolerant if checkpointed), and secondary providers exist specifically to remove a single vendor's quota ceiling as a hard constraint on scaling speed. Utilization measurement is a required input to the next forecast, not an afterthought report -- a capacity plan without a real feedback loop can't correct a bad forecast."
@@ -299,6 +327,7 @@
       "requirements": "Serve users from multiple regions for low latency and train wherever there's capacity.",
       "core_entities": "A region, a deployment.",
       "api_interface": "GET /serving/route?client_region= -> nearest region.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Replicate the serving stack in each region and pick whichever region has GPUs for training.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd add more regions if latency is bad somewhere."
@@ -308,6 +337,7 @@
       "requirements": "Training region selection is driven by data gravity and residency (where GPU capacity and legally-allowed data co-locate); serving region selection is driven by user proximity and failover -- these are different problems and a design that treats them identically misses the point.",
       "core_entities": "Region (GPU capacity profile, residency classification), Training job (bound to a region matching both capacity and residency), Serving replica (regional, with a failover target), Data residency policy.",
       "api_interface": "POST /training/schedule { dataset_residency_tag, gpu_requirement } -> region + reason; GET /serving/route?client_region= -> primary + failover region.",
+      "data_flow": "Serving traffic weights shift independently from training placement; replication lag is observed, not assumed zero. Sequence: Op\u2192TP (PUT weights); TP\u2192US (70%); TP\u2192EU (30%); Op\u2192Tr (place training job); Tr\u2192Op (region=us-east).",
       "high_level_design_text": "Training-region selection and serving-region selection are two separate decision paths that meet only at the trained-model artifact boundary, since a model is usually not subject to the same residency constraints as its raw training data once training completes.",
       "high_level_design_mermaid": "flowchart TB\n    subgraph Training\n    DATA[Residency-tagged data] --> TSCHED[Training scheduler]\n    TSCHED --> TREGION[Training region]\n    end\n    subgraph Serving\n    USER[User] --> GLB[Global load balancer]\n    GLB --> SA[Region A]\n    GLB -.->|failover| SB[Region B]\n    end",
       "deep_dives": "A regulator-mandated residency constraint is real and non-negotiable -- provision capacity in the compliant region even at higher cost, or don't offer that capability to that customer segment, since there's no clever routing trick around a legal boundary. Whether a trained model actually inherits its training data's residency constraint is a testable question, not an assumption -- membership inference auditing checks whether the model can be made to emit specific training examples, and differential privacy (DP-SGD) is the real architectural mitigation with a genuine accuracy-vs-privacy-budget cost, not a free choice."
@@ -320,6 +350,7 @@
       "requirements": "If something breaks, roll back to a backup and recover quickly.",
       "core_entities": "A deployment, a backup.",
       "api_interface": "POST /rollback { deployment_id } -> restored deployment.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Keep backups of the model and roll back to the last one if something goes wrong.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd test the rollback process occasionally."
@@ -329,6 +360,7 @@
       "requirements": "Separate RTO/RPO targets by workload -- serving needs near-zero RPO and minutes-scale RTO since it's directly user-facing; model artifact storage needs zero RPO since losing a version means an expensive re-training cycle; training pipelines can tolerate hours-scale RTO with checkpoint-based RPO.",
       "core_entities": "Model artifact (versioned, immutable), Deployment (artifact + traffic percentage), Incident (triggers rollback or regional failover), Rollback target (last eval-gate-passed deployment).",
       "api_interface": "POST /deploy { model_artifact_id, traffic_pct } -> deployment_id; POST /rollback { deployment_id } -> restored_deployment_id, eta_seconds.",
+      "data_flow": "Drills exercise the same failover sequence used in incidents; checkpoints make RTO measurable. Sequence: SRE\u2192DR (POST failover); DR\u2192S (warm artifacts/config); DR\u2192P (drain); DR\u2192S (shift traffic); DR\u2192SRE (checkpoints complete).",
       "high_level_design_text": "Two distinct failure classes handled differently: a bad deployment (rollback to last-good, entirely within one region, should be near-instant) versus a regional infrastructure failure (failover to a secondary region running the same last-good model) -- conflating these into one recovery path is the common weak design.",
       "high_level_design_mermaid": "flowchart LR\n    NEW[New deployment] -->|canary| PROD[Production traffic]\n    PROD --> MON[Health/quality monitor]\n    MON -->|regression| ROLLBACK[Automatic rollback]\n    subgraph Regional DR\n    PRIMARY[Primary region] -.->|health fails| SECONDARY[Secondary region]\n    end",
       "deep_dives": "Rollback to the last known-good model is the actual first line of defense, exercised far more often than regional failover -- an elaborate regional-failover architecture with rollback treated as an afterthought gets the priority backwards. Pre-production eval gating (a real, versioned golden suite gating promotion) is a stronger primary defense than fast post-hoc recovery, since it prevents the bad deployment from ever reaching production traffic at all -- test the DR plan by actually triggering a rollback and failover on a schedule, not just documenting the intended procedure."
@@ -341,6 +373,7 @@
       "requirements": "Connect the training nodes with a fast network.",
       "core_entities": "A node, a GPU.",
       "api_interface": "N/A -- internal cluster networking, no external API.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Put all training nodes in the same VPC with a fast network connection and use NCCL for GPU communication.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd upgrade the network if bandwidth becomes a bottleneck."
@@ -350,6 +383,7 @@
       "requirements": "All-reduce/all-to-all collective operations are synchronous barriers -- every rank waits for the slowest path before the next step starts -- so the network's worst-case latency, not average, sets the actual training step time, and placement needs to be topology-aware, not just fast in aggregate.",
       "core_entities": "Node (rack/switch/zone position), Collective operation (all-reduce/all-to-all via NCCL), Topology (bisection bandwidth at each level), Placement (rank-to-node assignment).",
       "api_interface": "POST /scheduler/place { job_id, world_size, gpus_per_node } -> rank_to_node_mapping, topology_score.",
+      "data_flow": "Declare fabric intent \u2192 provision rails \u2192 jobs run collectives; telemetry detects hangs/loss. Sequence: Op\u2192Net (POST network + intents); Net\u2192Fab (provision RoCE rails); Job\u2192Fab (allreduce traffic); Fab\u2192Net (telemetry (rtt, loss)).",
       "high_level_design_text": "RDMA/RoCE or InfiniBand for the training fabric, with topology-aware scheduling co-locating tightly-coupled ranks (tensor-parallel) within a rack while loosely-coupled ranks (data-parallel) can spread across racks or zones.",
       "high_level_design_mermaid": "flowchart TB\n    subgraph RackA\n    N1[Node] ---|RDMA| N2[Node]\n    end\n    subgraph RackB\n    N3[Node] ---|RDMA| N4[Node]\n    end\n    N1 -.->|spine, lower bandwidth| N3\n    SCHED[Topology-aware scheduler] --> N1",
       "deep_dives": "RoCE trades Ethernet's cost/ecosystem advantage for RDMA's latency benefit by bypassing the kernel network stack (Meta's real documented choice); InfiniBand gives the lowest latency at higher hardware cost. The straggler problem is the subtler failure mode: a single degraded, not failed, link can silently slow an entire multi-day run to its slowest participant with no error produced, since there's no request to retry against a synchronous barrier -- this needs per-link health monitoring and automated exclusion of degraded nodes, not post-hoc failure detection."
@@ -362,6 +396,7 @@
       "requirements": "Keep secrets in a secret manager and require authentication for sensitive access.",
       "core_entities": "A secret, an access log.",
       "api_interface": "N/A -- policy/infra layer, not a public API.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Store API keys in a secret manager, require auth for model weight access, and log who accessed what.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd rotate keys periodically for security."
@@ -371,6 +406,7 @@
       "requirements": "Model weights need a categorically different access control from standard secrets -- multi-party authorization, not just stricter single-approver auth -- because a single exfiltration event reproduces the company's entire core product capability, unlike any single-artifact-theft risk in most non-AI software. Compliance certifications (SOC2, HIPAA) are market-access decisions with specific engineering cost, not a general hardening checkbox.",
       "core_entities": "Model weights artifact (multi-party-authorized access), Access grant (scoped, auditable, time-bound), Secret (managed store, rotation policy), Compliance boundary.",
       "api_interface": "POST /access/request { resource, requestor, justification } -> approved, requires_second_approver, audit_log_id.",
+      "data_flow": "Policy publish \u2192 enforce at gateway \u2192 scanners open findings \u2192 evidence export for audits; break-glass is time-boxed. Sequence: Sec\u2192Pol (publish policy); Pol\u2192GW (enforce); Scan\u2192Sec (findings); Sec\u2192Ev (export SOC2 pack).",
       "high_level_design_text": "The highest-value asset (model weights) gets a categorically different access control -- multi-party authorization -- not just a stricter version of the same single-approver flow used for lower-value resources (Anthropic's real, published ASL-3 standard).",
       "high_level_design_mermaid": "flowchart TB\n    ENG[Engineer] --> AUTHZ[Authorization layer]\n    AUTHZ -->|standard resource| GRANT[Scoped grant]\n    AUTHZ -->|model weights| APPROVER2[Second approver required]\n    APPROVER2 --> GRANT\n    GRANT --> AUDIT[(Audit log)]",
       "deep_dives": "The Llama weights leak is the concrete proof this isn't theoretical -- you can rotate a leaked API key, but you cannot meaningfully rotate leaked weights once redistributed. A real operational gotcha: a managed secret store rotating a key's value doesn't guarantee already-running compute picks it up -- a service can keep authenticating with the old key until a forced redeploy, so 'I rotated the key' and 'the old key stopped working' are two different claims that both need verifying (a real deployment found exactly this gap)."
@@ -383,6 +419,7 @@
       "requirements": "Run containers with autoscaling and use smaller instances to save cost.",
       "core_entities": "A container, a node.",
       "api_interface": "N/A -- infra orchestration layer, not a public API.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Use Kubernetes with autoscaling; add more pods when load increases.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd use smaller instance types where possible to cut cost."
@@ -392,6 +429,7 @@
       "requirements": "GPU bin-packing is coarser-grained and higher-stakes than CPU bin-packing since GPUs generally can't be fractionally shared -- a node with 3 of 8 GPUs allocated costs the same as a fully-packed one, making active consolidation a much higher-value optimization here than for CPU-only workloads.",
       "core_entities": "Pod/task (GPU-count and type requirement), Node (fixed GPU count), Cluster autoscaler, idle_allocated_gpus metric (distinct from simply unallocated).",
       "api_interface": "POST /schedule { workload_id, gpu_count, gpu_type, priority } -> node_id, wait_time_estimate; GET /cluster/utilization -> total/allocated/idle_allocated_gpus.",
+      "data_flow": "Deploy workload \u2192 autoscale on RPS \u2192 meter cost \u2192 rightsizing recommendation \u2192 apply change. Sequence: Dev\u2192WL (POST workload); WL\u2192Sch (schedule pods); Sch\u2192Cost (usage); Cost\u2192Dev (rightsizing); Dev\u2192WL (apply rightsizing).",
       "high_level_design_text": "Kubernetes at GPU scale (OpenAI's own documented approach) gives fine-grained scheduling control for sustained workloads, while a managed serverless option gives true scale-to-zero for genuinely bursty ones -- but only real applied-and-torn-down infrastructure, not a terraform plan, proves either claim.",
       "high_level_design_mermaid": "flowchart LR\n    WORK[Workload] --> SCHED[GPU-aware scheduler]\n    SCHED -->|fits| NODE[Existing GPU node]\n    SCHED -->|no fit| AUTOSCALE[Cluster autoscaler]\n    AUTOSCALE --> NEWNODE[New GPU node]\n    NODE --> UTIL[(Utilization tracker)]\n    UTIL -.->|idle GPU alert| RIGHTSIZE[Consolidation pass]",
       "deep_dives": "Real bugs only a real deployment surfaces, never a terraform plan: a Dockerfile silently never rebuilt after a new dependency was added, a container ignoring a platform-injected PORT variable, a container registry needing force-delete configured before teardown works. The actual evidence someone has real infrastructure experience is that the Terraform was applied, hit a live endpoint doing real work, and was torn down cleanly -- each independently verifiable -- not that it was merely written."
@@ -404,6 +442,7 @@
       "requirements": "Limit how many requests a client can make per time window.",
       "core_entities": "A client, a counter.",
       "api_interface": "CheckLimit(client_id) -> allowed: bool.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Keep a counter per client and reject requests once the counter exceeds the limit, resetting each window.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd increase the limit for premium clients."
@@ -413,6 +452,7 @@
       "requirements": "The limiter must work correctly across multiple servers handling the same client's traffic (a per-server in-memory counter undercounts), must avoid the fixed-window boundary-burst flaw, and needs an explicit, stated fail-open vs. fail-closed behavior if the counter store itself is unavailable.",
       "core_entities": "Client (applicable limit rules), Limit rule (threshold + window semantics), Counter/bucket (shared across servers via Redis or similar).",
       "api_interface": "CheckLimit(client_id, rule_id) -> allowed, remaining, retry_after_seconds.",
+      "data_flow": "Every request path calls check before work; multi-rule evaluation is one round-trip against shared atomic state. Sequence: S\u2192SDK (before handler); SDK\u2192C (POST /v1/check (rules, keys)); C\u2192R (atomic consume); R\u2192C (remaining / deny); C\u2192S (200 allow); S\u2192S (business logic).",
       "high_level_design_text": "A shared counter store (Redis) with an atomic check-and-increment (Lua script) closes the race condition a naive read-check-increment sequence has, where two concurrent requests can both read an under-limit value before either increments it.",
       "high_level_design_mermaid": "flowchart LR\n    REQ[Request] --> GATE[Rate limit check]\n    GATE -->|query| STORE[(Shared counter store)]\n    GATE -->|within limit| APP[Application]\n    GATE -->|over limit| REJECT[429]",
       "deep_dives": "A sliding-window counter or token bucket avoids the fixed-window flaw where a client can send the full limit at the very end of one window and again at the start of the next, doubling the effective rate briefly. For multi-region rate limiting, the real mechanism is either static fractional allocation (zero coordination, wastes capacity under skew) or periodic gossip/reconciliation (recovers accuracy at the cost of a bounded staleness window) -- naming which one and why, with a quantified trade-off, is what separates a strong answer from 'shard it regionally.'"
@@ -425,6 +465,7 @@
       "requirements": "Users send messages to each other and see them appear in real time.",
       "core_entities": "A message, a conversation.",
       "api_interface": "SendMessage(conversation_id, content) -> message_id.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Use WebSockets to keep a connection open, and push new messages to the recipient if they're online, otherwise store and deliver later.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd add more servers to handle more connections."
@@ -434,6 +475,7 @@
       "requirements": "Connection count, not database throughput, is the first-order scaling constraint -- a server hits a connection-count ceiling well before a database bottleneck -- and delivery must be at-least-once with client-side deduplication, since exactly-once at the server alone is either impossible or far more overhead than it's worth.",
       "core_entities": "Message (client-generated ID for dedup), Conversation, Connection (mapped to which server holds it), Presence record.",
       "api_interface": "Connect() -> persistent connection; SendMessage(conversation_id, content, client_message_id) -> pushed to recipient with delivery_status.",
+      "data_flow": "Send writes an ordered message, fanout updates inboxes, websocket pushes to online devices, acks advance cursors. Sequence: A\u2192API (POST message (idempotency key)); API\u2192Store (append seq); API\u2192Fan (fanout); Fan\u2192B (push message); B\u2192API (ack seq).",
       "high_level_design_text": "Because sender and recipient are often on different gateway servers, a stateful routing layer is required to know which server currently holds which user's connection -- a materially different problem than stateless request/response.",
       "high_level_design_mermaid": "flowchart LR\n    C1[Client A] --> GW1[Gateway 1]\n    C2[Client B] --> GW2[Gateway 2]\n    GW1 --> ROUTER[Connection router]\n    ROUTER -->|B on GW2| GW2\n    GW1 --> QUEUE[(Per-user ordered queue)]",
       "deep_dives": "WhatsApp's real published architecture leans on Erlang/BEAM's lightweight-process model specifically to maximize connections per machine, since that's the actual first-order bottleneck. Offline delivery needs per-recipient sequence numbers (Meta's real 'Iris' pattern) so a reconnecting client can request 'everything since sequence N' and get a gap-free, ordered backlog -- a raw pub/sub fan-out doesn't guarantee this across a disconnect/reconnect cycle."
@@ -446,6 +488,7 @@
       "requirements": "Show posts from people a user follows, ranked by relevance.",
       "core_entities": "A post, a follow relationship.",
       "api_interface": "GetFeed(user_id) -> ranked posts.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "When someone posts, push it to all their followers' feed caches, and show the feed in reverse-chronological or relevance order.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd tune the ranking algorithm over time."
@@ -455,6 +498,7 @@
       "requirements": "Read-heavy at extreme scale, so read-path efficiency dominates, and the design needs an explicit strategy for accounts with hundreds of millions of followers, since naive fan-out-on-write would mean one post triggers a catastrophic number of writes.",
       "core_entities": "Post (engagement signals), Follow graph, Feed entry (user, post, relevance score), Ranking model.",
       "api_interface": "GetFeed(user_id, cursor) -> ranked posts; CreatePost(author_id, content) -> post_id, fan_out_status.",
+      "data_flow": "Candidate generation \u2192 rank \u2192 blend \u2192 cache; client feedback trains the next ranker iteration. Sequence: C\u2192F (GET /v1/feed); F\u2192Cand (friends/groups/...); Cand\u2192Rank (score); Rank\u2192Cache (store page); Cache\u2192C (items + cursor); C\u2192F (POST /v1/feed/events).",
       "high_level_design_text": "A hybrid fan-out strategy by author type: fan-out-on-write (push to follower feed caches) for normal accounts, fan-out-on-read (compute at request time) for celebrity/huge-follower accounts, merged at aggregation time (Meta's real, published Aggregator/Leaf/Tailer pattern).",
       "high_level_design_mermaid": "flowchart TB\n    POST[New post] --> FANOUT{Fan-out decision}\n    FANOUT -->|normal| WRITE[Push to feed caches]\n    FANOUT -->|celebrity| SKIP[Skip write fan-out]\n    REQ[GetFeed] --> AGG[Aggregator]\n    AGG --> WRITE\n    AGG -->|celebrity posts| CELEB[(Celebrity index)]",
       "deep_dives": "Pure fan-out-on-write breaks down for a 100M-follower account -- one post would require 100M+ individual cache writes, which is why real systems specifically design the hybrid split. Ranking is a genuinely separate, multi-stage process (cheap candidate generation, then an expensive ranking model, then diversity/integrity adjustments), and position bias needs correction via inverse-propensity weighting or randomized exploration, not just a diversity penalty bolted onto the final sort."
@@ -467,6 +511,7 @@
       "requirements": "Run scheduled jobs on a fleet of workers and retry if a worker fails.",
       "core_entities": "A job, a worker.",
       "api_interface": "ScheduleJob(cron_expr, job_spec) -> job_id.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "A scheduler checks a database for due jobs and dispatches them to available workers.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd retry a job if a worker crashes."
@@ -476,6 +521,7 @@
       "requirements": "True exactly-once execution is not achievable across a network that can partition -- the real target is at-least-once execution plus idempotency -- and the scheduler itself must not be a single point of failure, since a scheduler crash shouldn't halt all jobs until manually restarted.",
       "core_entities": "Job definition (schedule, retry policy), Job execution (time-bounded lease), Lease, Worker.",
       "api_interface": "ScheduleJob(cron_expr, job_spec, retry_policy) -> job_id; GET /jobs/{id}/executions -> status per execution.",
+      "data_flow": "Enqueue \u2192 lease \u2192 worker execute \u2192 ack/nack; leases prevent double-processing under failure. Sequence: P\u2192Q (POST task); W\u2192Q (lease); Q\u2192W (task + lease_token); W\u2192W (execute); W\u2192Q (ack); W\u2192Q (nack).",
       "high_level_design_text": "The scheduler runs as a small Paxos/Raft-based consensus cluster (Google's real, documented distributed cron design) -- one active leader firing jobs, standbys ready to take over, with consensus guaranteeing at most one leader is ever recognized by a majority.",
       "high_level_design_mermaid": "flowchart LR\n    DEF[Job definitions] --> LEADER[Scheduler leader]\n    LEADER -->|consensus| STANDBY[Standby schedulers]\n    LEADER --> QUEUE[(Execution queue)]\n    QUEUE --> WORKER[Worker: leases execution]\n    WORKER -->|lease expires| REASSIGN[Reassign]",
       "deep_dives": "A worker holds a time-bounded lease; if it expires without completion, the execution is reassigned -- meaning a job can genuinely run twice if the original worker was just slow, not dead, so idempotency is structural, not optional. An explicit backlog-catch-up policy after an extended outage matters too -- running overdue jobs in priority order, and treating some as stale enough that running them late is actively wrong, as a per-job configuration, not a scheduler-wide default."
@@ -488,6 +534,7 @@
       "requirements": "Generate unique IDs across multiple machines without collisions.",
       "core_entities": "An ID, a generator node.",
       "api_interface": "GenerateID() -> uint64.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Use a central counter service that hands out the next ID, or fall back to random UUIDs.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd add more counter service replicas if it becomes a bottleneck."
@@ -497,6 +544,7 @@
       "requirements": "IDs must be unique with zero coordination on the hot path (a centralized counter recreates the exact single-bottleneck problem a distributed system is trying to avoid) and should be roughly sortable by creation time for pagination, while correctly handling clock skew across generator nodes.",
       "core_entities": "Generator node (assigned node ID, out of band), ID (timestamp + node ID + sequence bits, Snowflake-style structure).",
       "api_interface": "GenerateID() -> uint64, no network call on the hot path.",
+      "data_flow": "Clients allocate IDs via the service (batch optional); decode exposes datacenter/worker/time for debugging. Sequence: S\u2192ID (POST /v1/ids count=N); ID\u2192Alloc (ensure worker id); Alloc\u2192ID (worker/datacenter); ID\u2192S (ids[]); S\u2192ID (GET decode/{id}).",
       "high_level_design_text": "Uniqueness by construction: each node's assigned ID is baked into every ID it generates, so as long as node IDs are unique and each node's per-millisecond sequence counter doesn't overflow, no coordination is needed between nodes at request time.",
       "high_level_design_mermaid": "flowchart TB\n    subgraph ID structure\n    TS[41 bits: timestamp] --> NODE[10 bits: node ID]\n    NODE --> SEQ[12 bits: sequence]\n    end\n    GEN[Generator node] --> ID[64-bit unique ID]",
       "deep_dives": "A structural, not reactive, fix for clock skew: a Hybrid Logical Clock combines physical time with a logical counter that only ever increases, guaranteeing monotonicity per node regardless of physical clock behavior, and also solving cross-node causal ordering -- a stronger answer than 'detect a backward jump and buffer.' Worth naming plainly: Snowflake is a real Twitter system, not something any of these six companies invented -- don't misattribute it."
@@ -509,6 +557,7 @@
       "requirements": "Multiple users can edit the same document at the same time.",
       "core_entities": "A document, an edit.",
       "api_interface": "ApplyOperation(doc_id, operation) -> new document state.",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Apply each user's edits to the document in the order they arrive at the server.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd handle conflicts by whoever saved last."
@@ -518,6 +567,7 @@
       "requirements": "Concurrent edits to the same or overlapping regions must converge to the same final state for every user, not diverge -- last-write-wins silently loses data the moment two users edit overlapping regions concurrently, which is the exact case that needs to be handled correctly, not just the common non-overlapping case.",
       "core_entities": "Document (operation history), Operation (insert/delete at a position), Client state (version marker).",
       "api_interface": "ApplyOperation(doc_id, operation, client_version) -> transformed_operation, new_version, broadcast to other clients.",
+      "data_flow": "Clients send ops against a base revision; server transforms, assigns rev, broadcasts; snapshots compact history. Sequence: A\u2192GW (op(base_rev)); GW\u2192OT (transform); OT\u2192Log (append rev); OT\u2192GW (ack rev); GW\u2192A (ack); GW\u2192A (peer ops).",
       "high_level_design_text": "Operational transformation (server-mediated, requires a central sequencing authority) or CRDTs (peer-to-peer capable, no central authority needed) are the two real answers -- the transform function itself, adjusting one operation's position indices to account for a concurrent one already applied, is the actual hard part, not the high-level 'let users edit together' concept.",
       "high_level_design_mermaid": "flowchart LR\n    C1[Client A types] --> LOCAL1[Local state, optimistic]\n    C1 --> SERVER[OT/CRDT server]\n    C2[Client B types] --> SERVER\n    SERVER -->|transform| TRANSFORMED[Transformed ops]\n    TRANSFORMED --> LOCAL1\n    TRANSFORMED --> LOCAL2[Local state B]",
       "deep_dives": "CRDTs have a real, often-omitted operational cost: tombstones (markers for deleted content) must be retained for every deletion in a naive implementation, since a late-arriving concurrent operation from an offline peer might still reference that position -- real systems need explicit tombstone garbage collection bounded by the oldest still-syncing peer's state, not unbounded retention. The OT-vs-CRDT choice should map to a real product requirement: offline-first support favors CRDTs; an always-online product can accept OT's central-server dependency."
@@ -530,6 +580,7 @@
       "requirements": "Cache frequently-accessed data to reduce load on the database.",
       "core_entities": "A cache entry, the database.",
       "api_interface": "Get(key) -> value; Set(key, value).",
+      "data_flow": "Client calls the API, the server does the work, and returns a response. Maybe there's a database in the middle.",
       "high_level_design_text": "Check the cache first; on a miss, query the database and populate the cache with a TTL.",
       "high_level_design_mermaid": "",
       "deep_dives": "We'd increase the TTL if the cache hit rate is too low."
@@ -539,6 +590,7 @@
       "requirements": "TTL-only invalidation isn't sufficient -- a write followed by an immediate read can still return stale data for the rest of the TTL window unless writes trigger explicit invalidation -- and the design must scale across multiple axes: within a cluster, across clusters in a region, and across regions, not just add more cache servers.",
       "core_entities": "Cache entry (key, value, TTL), Cache cluster (consistent-hashed), Origin/backing store, Edge location (for the CDN variant).",
       "api_interface": "Get(key) -> value, hit: bool; Set(key, value, ttl); Invalidate(key).",
+      "data_flow": "Read-through on miss; writes set TTL; tag invalidation and CDN purge are separate, higher-blast-radius paths. Sequence: App\u2192L1 (GET key); L1\u2192App (value); L1\u2192L2 (GET); L2\u2192O (fetch); O\u2192L2 (value); L2\u2192App (value).",
       "high_level_design_text": "Write-triggered invalidation alongside TTL, with consistent hashing distributing keys across cache servers, and a real multi-axis scaling story: within-cluster, cross-cluster regional pools, and cross-region replication (Meta's real, published Memcache-at-scale architecture).",
       "high_level_design_mermaid": "flowchart LR\n    REQ[Request] --> CACHE{Cache lookup}\n    CACHE -->|hit| RETURN[Return cached value]\n    CACHE -->|miss| ORIGIN[(Origin)]\n    ORIGIN --> POPULATE[Populate cache]\n    WRITE[Write] --> INVALIDATE[Invalidate entry]",
       "deep_dives": "The thundering herd problem -- many concurrent requests missing simultaneously when a popular entry expires or a node fails, all hammering the origin at once -- is mitigated with request coalescing (the first miss populates the cache, concurrent requests wait on that result) or jittered TTLs so entries don't all expire at once. Cross-region cache invalidation is a genuinely hard trade-off: synchronous propagation adds write latency; asynchronous leaves a real staleness window -- naming this trade-off explicitly, the way Meta's real architecture had to, is what a senior-only answer misses."
