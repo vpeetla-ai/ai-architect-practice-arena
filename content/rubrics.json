@@ -453,6 +453,7 @@
       "principal": "additionally specifies the actual cross-region synchronization mechanism (static fractional allocation vs. periodic gossip/reconciliation) with its concrete staleness- vs-accuracy trade-off quantified \u2014 not just \"trade exactness for latency\" as an unmechanized observation \u2014 and picks the right one against a stated traffic-skew assumption."
     },
     "related_deep_dives": [
+      "coding/02: Token-bucket rate limiter (in-process)",
       "system-design/01: LLM inference serving at scale",
       "ai-system-design/09: Multi-tenant AI platform architecture"
     ]
@@ -520,6 +521,7 @@
       "principal": "additionally designs the scheduler's own high-availability mechanism (leader election via consensus) explicitly, connecting it to the same split-brain-avoidance principle that makes distributed consensus hard in general, not just asserting \"run multiple instances.\""
     },
     "related_deep_dives": [
+      "coding/04: Concurrent bounded queue",
       "general-system-design/01: Distributed rate limiter",
       "cloud-architecture/03: Disaster recovery for model serving"
     ]
@@ -584,6 +586,8 @@
       "principal": "additionally addresses the thundering-herd failure mode with a concrete mitigation (request coalescing, jittered TTLs) and can reason about the cost/consistency trade-off of synchronous vs. asynchronous cross-region invalidation explicitly."
     },
     "related_deep_dives": [
+      "coding/01: LRU cache with concurrency",
+      "coding/08: Debug broken cache eviction",
       "general-system-design/03: News feed / ranking system",
       "ai-system-design/01: LLM inference serving at scale"
     ]
@@ -780,6 +784,270 @@
       "scalability-governance-tradeoffs/02: Build vs. buy for shared services",
       "system-design/08: Fine-tuning/RLHF training pipeline at scale",
       "system-design/11: On-device/edge AI inference architecture"
+    ]
+  },
+  {
+    "question_id": "coding/00-staff-plus-coding-bar",
+    "title": "Staff+ coding bar \u2014 how this round is graded",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "\"We still do a coding round for Staff. What does a strong answer look like?\"",
+    "framework_summary": "Staff+ coding is graded on judgment under constraints, not puzzle novelty.",
+    "supporting_evidence_summary": "## What interviewers listen for\n| Signal | Strong | Weak |\n|--------|--------|------|\n| Clarifying questions | Scale, concurrency, API contract | Starts coding immediately |\n| Solution | End-to-end correct | Partial clever fragment |\n| Code quality | Readable names, clear invariants | Golfed one-liners |\n| Complexity | Stated before/after coding | Never mentioned |\n| Tests | Walks 2\u20133 cases aloud | \"Looks right\" |\n| Staff extension | Concurrency / API / failure \u2014 when asked or briefly offered | Jumps to distributed systems unprompted |\n\n## Clarifying questions you should ask first\nSee the pattern in every `coding/0N-*.md` entry. Default set:\n\n1. Constraints on N / QPS / memory?\n2. Single-threaded vs multi-threaded callers?\n3. Exact semantics on ties, duplicates, nulls?\n4. Mutate input or return new structures?\n\n## What not to discuss in a coding round\n- Full multi-region architecture (wrong round \u2014 point to system design)\n- Rewriting the language runtime\n- Claiming O(1) without an invariant\n- Silence after writing code (always narrate tests)\n\n## How to use this folder\n1. Read the problem; timebox 5 minutes of clarifying + approach on paper\n2. Implement without looking at the reference\n3. Compare: approach ladder, Staff+ deep dive, \"what not to discuss\"\n4. Practice saying complexity and two tests out loud",
+    "level_criteria": {
+      "mid": "Working solution for the happy path; needs help on edges.",
+      "senior": "Clean medium solution + complexity + basic tests.",
+      "staff_plus": "Above, plus API clarity and a credible concurrency/production extension without derailing the clock.",
+      "principal": "Teaches the interviewer the invariant; connects the structure to a real system they've owned."
+    },
+    "related_deep_dives": [
+      "../staff-plus-interview-craft/01-what-staff-plus-actually-signals.md",
+      "01-lru-cache-with-concurrency.md"
+    ]
+  },
+  {
+    "question_id": "coding/01-lru-cache-with-concurrency",
+    "title": "Implement an LRU cache (Staff+ concurrency extension)",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Design a data structure that supports `get(key)` and `put(key, value)` in average O(1). When capacity is exceeded, evict the least recently used item. `get` and `put` both count as \"use.\"",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nHigh-signal coding/design hybrid across FAANG-style loops (LRU is among the most cross-company tested structures). Staff angle is rarely \"just HashMap + DLL\" \u2014 interviewers push **thread safety**, sharding, or distributed cache boundaries. Keep distributed design brief unless they open that door; the coding round wants a correct concurrent API.\n\n## Problem\nDesign a data structure that supports `get(key)` and `put(key, value)` in average O(1). When capacity is exceeded, evict the least recently used item. `get` and `put` both count as \"use.\"\n\n## Clarifying questions you should ask first\n1. Capacity fixed at construction?\n2. Single-threaded or concurrent callers?\n3. Value overwrite on existing key \u2014 does it refresh recency? (yes)\n4. Return sentinel vs exception on missing key?\n5. Do we need `delete` / iteration? (usually no for MVP)\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | List scan for LRU \u2014 O(n) get/put |\n| Correct | Hash map key\u2192node + doubly linked list for recency \u2014 O(1) |\n| Staff+ | Mutex around map+list; discuss sharded locks / lock-free as follow-up |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nfrom dataclasses import dataclass\nfrom threading import RLock\nfrom typing import Generic, Hashable, Optional, TypeVar\n\nK = TypeVar(\"K\", bound=Hashable)\nV = TypeVar(\"V\")\n\n@dataclass\nclass _Node(Generic[K, V]):\n    key: K\n    value: V\n    prev: Optional[\"_Node[K, V]\"] = None\n    next: Optional[\"_Node[K, V]\"] = None\n\nclass LRUCache(Generic[K, V]):\n    \"\"\"Thread-safe LRU with a single lock (correct, clear Staff+ baseline).\"\"\"\n\n    def __init__(self, capacity: int) -> None:\n        if capacity <= 0:\n            raise ValueError(\"capacity must be positive\")\n        self.capacity = capacity\n        self._map: dict[K, _Node[K, V]] = {}\n        self._head: _Node[K, V] = _Node(None, None)  # type: ignore[arg-type]\n        self._tail: _Node[K, V] = _Node(None, None)  # type: ignore[arg-type]\n        self._head.next = self._tail\n        self._tail.prev = self._head\n        self._lock = RLock()\n\n    def get(self, key: K) -> Optional[V]:\n        with self._lock:\n            node = self._map.get(key)\n            if node is None:\n                return None\n            self._move_to_front(node)\n            return node.value\n\n    def put(self, key: K, value: V) -> None:\n        with self._lock:\n            node = self._map.get(key)\n            if node is not None:\n                node.value = value\n                self._move_to_front(node)\n                return\n            node = _Node(key, value)\n            self._map[key] = node\n            self._add_front(node)\n            if len(self._map) > self.capacity:\n                lru = self._tail.prev\n                assert lru is not None and lru is not self._head\n                self._remove(lru)\n                del self._map[lru.key]\n\n    def _add_front(self, node: _Node[K, V]) -> None:\n        nxt = self._head.next\n        self._head.next = node\n        node.prev = self._head\n        node.next = nxt\n        assert nxt is not None\n        nxt.prev = node\n\n    def _remove(self, node: _Node[K, V]) -> None:\n        assert node.prev is not None and node.next is not None\n        node.prev.next = node.next\n        node.next.prev = node.prev\n        node.prev = node.next = None\n\n    def _move_to_front(self, node: _Node[K, V]) -> None:\n        self._remove(node)\n        self._add_front(node)\n```\n\n**Complexity:** get/put average O(1) time; O(capacity) space.\n\n## Verbal tests to narrate\n1. capacity=2; put(1,a), put(2,b), get(1)\u2192a; put(3,c) evicts 2; get(2)\u2192None\n2. put same key twice refreshes order and updates value\n3. Concurrent: two threads put different keys at capacity \u2014 no lost updates / corruption (lock)\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| Single lock | Correct and interview-friendly; throughput limited under contention |\n| Sharding | N independent LRUs by `hash(key) % N` \u2014 weaker global LRU, higher throughput |\n| Distributed cache | Different problem (network, consistency); don't derail unless asked |\n| Metrics | Hit rate, eviction rate, lock wait time |\n\n## What not to discuss\n- Jumping straight to Redis Cluster before a correct local LRU\n- Claiming lock-free without sketching the hard parts (ABA, memory order)\n- Spending 20 minutes on ASCII art of the list",
+    "level_criteria": {
+      "mid": "Working single-threaded LRU; may struggle with DLL edge cases.",
+      "senior": "Clean O(1) LRU + complexity + tests.",
+      "staff_plus": "Thread-safe API, clear lock scope, can discuss sharding trade-offs briefly.",
+      "principal": "Connects to real cache ownership (hit-rate SLOs, stampede, multi-tenant isolation)."
+    },
+    "related_deep_dives": [
+      "../general-system-design/07-distributed-cache-cdn-layer.md",
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/02-rate-limiter-token-bucket",
+    "title": "Implement a token-bucket rate limiter (in-process)",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Implement `allow(client_id) -> bool` using a token bucket: capacity `C`, refill `R` tokens per second. Each allowed request consumes 1 token. Reject when empty.",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nCoding sibling of the classic \"design a rate limiter\" system-design question. In coding rounds, expect an **in-process** or single-node API first; Redis/Lua atomicity is the Staff follow-up, not the opening move.\n\n## Problem\nImplement `allow(client_id) -> bool` using a token bucket: capacity `C`, refill `R` tokens per second. Each allowed request consumes 1 token. Reject when empty.\n\n## Clarifying questions you should ask first\n1. Per-client buckets or global?\n2. Burst size = capacity?\n3. Clock source / monotonic time?\n4. Thread-safe?\n5. Fail open or closed if state store fails? (for distributed follow-up)\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | Fixed window counter \u2014 easy, boundary burst 2\u00d7 |\n| Correct | Token bucket with last refill timestamp |\n| Staff+ | Atomic update under lock; discuss Redis Lua for multi-node |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nimport time\nfrom dataclasses import dataclass\nfrom threading import Lock\n\n@dataclass\nclass _Bucket:\n    tokens: float\n    last_ts: float\n\nclass TokenBucketLimiter:\n    def __init__(self, capacity: float, refill_per_sec: float) -> None:\n        if capacity <= 0 or refill_per_sec <= 0:\n            raise ValueError(\"capacity and refill must be positive\")\n        self.capacity = capacity\n        self.refill_per_sec = refill_per_sec\n        self._buckets: dict[str, _Bucket] = {}\n        self._lock = Lock()\n\n    def allow(self, client_id: str, now: float | None = None) -> bool:\n        now = time.monotonic() if now is None else now\n        with self._lock:\n            b = self._buckets.get(client_id)\n            if b is None:\n                b = _Bucket(tokens=self.capacity, last_ts=now)\n                self._buckets[client_id] = b\n            elapsed = max(0.0, now - b.last_ts)\n            b.tokens = min(self.capacity, b.tokens + elapsed * self.refill_per_sec)\n            b.last_ts = now\n            if b.tokens < 1.0:\n                return False\n            b.tokens -= 1.0\n            return True\n```\n\n**Complexity:** O(1) per allow; O(#clients) memory (mention TTL eviction of idle clients as Staff follow-up).\n\n## Verbal tests to narrate\n1. capacity=1, refill=1/s: allow\u2192True, immediate allow\u2192False, after 1s allow\u2192True\n2. capacity=5: five bursts succeed, sixth fails\n3. Two clients independent\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| Fixed vs sliding vs token bucket | Burst vs smoothness vs accuracy |\n| Multi-node | Shared Redis + Lua to avoid TOCTOU on GET/INCR |\n| Fail open/closed | Product/security decision \u2014 say it explicitly |\n| Idle client GC | Bound memory |\n\n## What not to discuss\n- Drawing a full multi-region mesh before the local algorithm works\n- Claiming \"exactly N per window\" with token bucket (it's burst-friendly)",
+    "level_criteria": {
+      "mid": "Fixed window works.",
+      "senior": "Token bucket + tests + complexity.",
+      "staff_plus": "Concurrency + multi-node atomicity + fail-open/closed.",
+      "principal": "Ties limiter choice to abuse economics and customer UX SLOs."
+    },
+    "related_deep_dives": [
+      "../general-system-design/01-distributed-rate-limiter.md",
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/03-time-based-kv-store",
+    "title": "Time-based key-value store",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Implement: - `set(key, value, timestamp)` \u2014 timestamps for a key are strictly increasing - `get(key, timestamp)` \u2014 largest value with time \u2264 timestamp, or null",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nCommon Meta/FAANG-style medium: map of keys to timestamped values; query value at time `t`. Staff signal is **API clarity**, binary search correctness, and memory/GC discussion \u2014 not jumping to a distributed database.\n\n## Problem\nImplement:\n\n- `set(key, value, timestamp)` \u2014 timestamps for a key are strictly increasing\n- `get(key, timestamp)` \u2014 largest value with time \u2264 timestamp, or null\n\n## Clarifying questions you should ask first\n1. Are timestamps strictly increasing per key? (usually yes \u2014 confirm)\n2. Integer timestamps?\n3. Concurrent sets on same key?\n4. Need delete / range scan?\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | List of (ts, val); linear scan |\n| Correct | List/array per key + binary search |\n| Staff+ | Discuss write concurrency; immutable snapshots; disk spill |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nimport bisect\nfrom threading import RLock\n\nclass TimeMap:\n    def __init__(self) -> None:\n        self._data: dict[str, list[tuple[int, str]]] = {}\n        self._lock = RLock()\n\n    def set(self, key: str, value: str, timestamp: int) -> None:\n        with self._lock:\n            arr = self._data.setdefault(key, [])\n            if arr and timestamp < arr[-1][0]:\n                raise ValueError(\"timestamps must be non-decreasing per key\")\n            arr.append((timestamp, value))\n\n    def get(self, key: str, timestamp: int) -> str | None:\n        with self._lock:\n            arr = self._data.get(key)\n            if not arr:\n                return None\n            i = bisect.bisect_right(arr, (timestamp, chr(0x10FFFF))) - 1\n            if i < 0:\n                return None\n            return arr[i][1]\n```\n\n**Complexity:** set O(1) amortized append; get O(log n) per key history.\n\n## Verbal tests to narrate\n1. set a@1, b@2; get@1\u2192a; get@3\u2192b; get@0\u2192None\n2. Multiple keys independent\n3. Duplicate timestamp policy \u2014 confirm with interviewer (overwrite vs reject)\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| bisect keying | Pair (ts, value) ordering pitfalls \u2014 prefer parallel ts/val arrays |\n| Memory | Bound history; downsample old versions |\n| Distributed | Versioned stores / MVCC \u2014 only if asked |\n\n## What not to discuss\n- Building Cassandra in 40 minutes\n- Ignoring the non-decreasing timestamp assumption without asking",
+    "level_criteria": {
+      "mid": "Linear scan works.",
+      "senior": "Binary search + clean API.",
+      "staff_plus": "Concurrency + memory bounds + bisect edge cases.",
+      "principal": "Relates to real config/feature-flag versioning systems."
+    },
+    "related_deep_dives": [
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/04-concurrent-bounded-queue",
+    "title": "Concurrent bounded blocking queue",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Implement a bounded queue with `put(item)` (blocks if full) and `take()` (blocks if empty), safe for multiple producers and consumers.",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nConcurrency classic (producer/consumer). Staff+ cares about **correct waiting**, spurious wakeups, and fairness \u2014 not clever lock-free unless prompted.\n\n## Problem\nImplement a bounded queue with `put(item)` (blocks if full) and `take()` (blocks if empty), safe for multiple producers and consumers.\n\n## Clarifying questions you should ask first\n1. Capacity fixed?\n2. Timeout variants needed (`offer` / `poll`)?\n3. Fair locking required?\n4. Null items allowed?\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | Unbounded list + busy spin |\n| Correct | `Condition` variables + mutex |\n| Staff+ | Discuss disruption, poison-pill shutdown, metrics |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nfrom collections import deque\nfrom threading import Condition\nfrom typing import Deque, Generic, TypeVar\n\nT = TypeVar(\"T\")\n\nclass BoundedBlockingQueue(Generic[T]):\n    def __init__(self, capacity: int) -> None:\n        if capacity <= 0:\n            raise ValueError(\"capacity must be positive\")\n        self._capacity = capacity\n        self._q: Deque[T] = deque()\n        self._cv = Condition()\n\n    def put(self, item: T) -> None:\n        with self._cv:\n            while len(self._q) >= self._capacity:\n                self._cv.wait()\n            self._q.append(item)\n            self._cv.notify_all()\n\n    def take(self) -> T:\n        with self._cv:\n            while not self._q:\n                self._cv.wait()\n            item = self._q.popleft()\n            self._cv.notify_all()\n            return item\n\n    def size(self) -> int:\n        with self._cv:\n            return len(self._q)\n```\n\n**Complexity:** O(1) put/take amortized; blocking as required.\n\n## Verbal tests to narrate\n1. capacity=1: put blocks second producer until take\n2. take on empty blocks until put\n3. Multi producer/consumer smoke (narrate race freedom via monitor)\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| `while` not `if` | Spurious wakeup / multi-waiter correctness |\n| notify vs notify_all | notify_all simpler; notify needs careful pairing |\n| Shutdown | Poison pill or separate closed flag |\n| Backpressure | Bounded queue *is* backpressure |\n\n## What not to discuss\n- Lock-free Michael-Scott queue unless interviewer asks\n- Equating this with Kafka (different problem)",
+    "level_criteria": {
+      "mid": "Mutex + queue; may miss wait conditions.",
+      "senior": "Correct blocking with conditions.",
+      "staff_plus": "Explains while-loops, shutdown, backpressure.",
+      "principal": "Ties to real pipeline backpressure and overload control."
+    },
+    "related_deep_dives": [
+      "../general-system-design/04-distributed-job-scheduler-task-queue.md",
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/05-top-k-frequent-stream",
+    "title": "Top-K frequent elements (stream-aware)",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Given an array of integers, return the `k` most frequent elements. Order among ties can be arbitrary unless specified.",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nClassic heap/hash medium. Staff+ extension: **streaming / approximate** (Count-Min + heap) when N does not fit in memory \u2014 mention without implementing a full sketch unless asked.\n\n## Problem\nGiven an array of integers, return the `k` most frequent elements. Order among ties can be arbitrary unless specified.\n\n## Clarifying questions you should ask first\n1. Can entire array fit in memory?\n2. Tie-breaking rules?\n3. k relative to unique count?\n4. Online/stream version needed?\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | Count + sort unique \u2014 O(u log u) |\n| Correct | Count + size-k heap \u2014 O(n log k) |\n| Staff+ | Stream: Count-Min Sketch + heap; error bounds |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nfrom collections import Counter\nimport heapq\n\ndef top_k_frequent(nums: list[int], k: int) -> list[int]:\n    if k <= 0:\n        return []\n    counts = Counter(nums)\n    # nsmallest on (-freq) via heapq.nlargest on freq\n    return [x for x, _ in heapq.nlargest(k, counts.items(), key=lambda kv: kv[1])]\n```\n\n**Complexity:** O(n + u log k) time; O(u) space.\n\n## Verbal tests to narrate\n1. [1,1,1,2,2,3], k=2 \u2192 [1,2]\n2. All unique, k=1 \u2192 any one\n3. k equals unique count \u2192 all keys\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| Why heap not full sort | k << u |\n| Stream | Sketch trades accuracy for memory \u2014 state error bound |\n| Distributed | Local top-k + merge is approximate |\n\n## What not to discuss\n- Building a real-time analytics platform before the heap solution works\n- Ignoring memory assumption",
+    "level_criteria": {
+      "mid": "Counter + sort.",
+      "senior": "Heap solution + complexity.",
+      "staff_plus": "Streaming/approximate trade-off with clear error talk.",
+      "principal": "Relates to real metrics pipelines and cardinality limits."
+    },
+    "related_deep_dives": [
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/06-merge-k-sorted-iterators",
+    "title": "Merge K sorted lists / iterators",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Merge k sorted ascending integer lists into one sorted list (or yield via iterator).",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nHeap classic; Staff+ cares about **iterator API**, laziness, and external sort / k-way merge for files.\n\n## Problem\nMerge k sorted ascending integer lists into one sorted list (or yield via iterator).\n\n## Clarifying questions you should ask first\n1. Lists already sorted ascending?\n2. Duplicates allowed?\n3. Total length N, k lists \u2014 memory bound?\n4. Return list vs lazy iterator?\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | Concat + sort \u2014 O(N log N) |\n| Correct | Min-heap of (value, list_index, elem_index) \u2014 O(N log k) |\n| Staff+ | Lazy iterator; external k-way merge |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nimport heapq\nfrom typing import Iterator\n\ndef merge_k_sorted(lists: list[list[int]]) -> list[int]:\n    heap: list[tuple[int, int, int]] = []\n    for i, lst in enumerate(lists):\n        if lst:\n            heapq.heappush(heap, (lst[0], i, 0))\n    out: list[int] = []\n    while heap:\n        val, li, ei = heapq.heappop(heap)\n        out.append(val)\n        nxt = ei + 1\n        if nxt < len(lists[li]):\n            heapq.heappush(heap, (lists[li][nxt], li, nxt))\n    return out\n\ndef merge_k_sorted_iter(lists: list[list[int]]) -> Iterator[int]:\n    heap: list[tuple[int, int, int]] = []\n    for i, lst in enumerate(lists):\n        if lst:\n            heapq.heappush(heap, (lst[0], i, 0))\n    while heap:\n        val, li, ei = heapq.heappop(heap)\n        yield val\n        nxt = ei + 1\n        if nxt < len(lists[li]):\n            heapq.heappush(heap, (lists[li][nxt], li, nxt))\n```\n\n**Complexity:** O(N log k) time; O(k) heap space (+ output).\n\n## Verbal tests to narrate\n1. [[1,4,5],[1,3,4],[2,6]] \u2192 [1,1,2,3,4,4,5,6]\n2. Empty lists mixed in\n3. Single list identity\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| Why not pairwise merge | Tournament/heap better for large k |\n| External sort | Same algorithm over file runs |\n| Stability | Define if equal keys need source order |\n\n## What not to discuss\n- MapReduce job design before the heap works\n- Premature parallel merge without measuring",
+    "level_criteria": {
+      "mid": "Concat + sort.",
+      "senior": "Heap merge + complexity.",
+      "staff_plus": "Lazy API + external merge narrative.",
+      "principal": "Connects to real log/compaction pipelines."
+    },
+    "related_deep_dives": [
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/07-graph-clone-and-cycle-safe",
+    "title": "Clone a graph (cycle-safe)",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Given a reference to a node in a connected undirected graph where each node has `val` and `neighbors`, return a deep copy. Graph may contain cycles.",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nGraph medium with cycles. Staff+ signal: **map of visited**, clear BFS vs DFS, and API for undirected vs directed.\n\n## Problem\nGiven a reference to a node in a connected undirected graph where each node has `val` and `neighbors`, return a deep copy. Graph may contain cycles.\n\n## Clarifying questions you should ask first\n1. Undirected? Connected? Disconnected components?\n2. Node vals unique? (often yes \u2014 don't assume for identity)\n3. Mutate original allowed? (no)\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | Recurse without memo \u2014 infinite loop on cycles |\n| Correct | HashMap old\u2192new; DFS or BFS |\n| Staff+ | Iterative BFS for stack safety; multi-component entrypoint |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nfrom collections import deque\nfrom dataclasses import dataclass, field\n\n@dataclass\nclass Node:\n    val: int\n    neighbors: list[\"Node\"] = field(default_factory=list)\n\ndef clone_graph(node: Node | None) -> Node | None:\n    if node is None:\n        return None\n    mapping: dict[Node, Node] = {node: Node(node.val)}\n    q: deque[Node] = deque([node])\n    while q:\n        cur = q.popleft()\n        for nb in cur.neighbors:\n            if nb not in mapping:\n                mapping[nb] = Node(nb.val)\n                q.append(nb)\n            mapping[cur].neighbors.append(mapping[nb])\n    return mapping[node]\n```\n\n**Complexity:** O(V+E) time and space.\n\n## Verbal tests to narrate\n1. Two nodes pointing at each other\n2. Single node self-loop (if allowed) / no neighbors\n3. Verify cloned neighbor identity \u2260 original\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| Why map by object identity | Vals may collide in variants |\n| DFS recursion depth | Prefer BFS/iterative for large graphs |\n| Serialization | Clone vs serialize/deserialize trade-off |\n\n## What not to discuss\n- Distributed graph DBs\n- Ignoring cycles",
+    "level_criteria": {
+      "mid": "DFS clone; may miss cycles.",
+      "senior": "Memoized BFS/DFS + tests.",
+      "staff_plus": "Iterative, identity map, component discussion.",
+      "principal": "Relates to real object-graph copy / config snapshot systems."
+    },
+    "related_deep_dives": [
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/08-debug-broken-cache-eviction",
+    "title": "Debug: broken cache eviction",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "A teammate's LRU-like cache sometimes returns stale values and occasionally grows past capacity. Here is a simplified buggy sketch: ```python class BuggyCache: def __init__(self, capacity: int): self.capacity = capacity self.data = {} # key -> value self.order = [] # keys, oldest at index 0 def get(self, key): if key not in self.data: return None # BUG 1: refreshes by append without removing old index self.order.append(key) return self.data[key] def put(self, key, value): self.data[key] = value self.order.append(key) # BUG 2: evicts using order[0] even if that key was refreshed while len(self.data) > self.capacity: old = self.order.pop(0) if old in self.data: del self.data[old] ``` Find the bugs, explain failure modes, and provide a correct fix (or point to the proper LRU structure).",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\n2025\u20132026 loops increasingly use **debug/extend** instead of greenfield puzzles. You are given plausible code with a subtle bug; Staff+ narrates a hypothesis \u2192 test \u2192 fix loop.\n\n## Problem\nA teammate's LRU-like cache sometimes returns stale values and occasionally grows past capacity. Here is a simplified buggy sketch:\n\n```python\nclass BuggyCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.data = {}          # key -> value\n        self.order = []         # keys, oldest at index 0\n\n    def get(self, key):\n        if key not in self.data:\n            return None\n        # BUG 1: refreshes by append without removing old index\n        self.order.append(key)\n        return self.data[key]\n\n    def put(self, key, value):\n        self.data[key] = value\n        self.order.append(key)\n        # BUG 2: evicts using order[0] even if that key was refreshed\n        while len(self.data) > self.capacity:\n            old = self.order.pop(0)\n            if old in self.data:\n                del self.data[old]\n```\n\nFind the bugs, explain failure modes, and provide a correct fix (or point to the proper LRU structure).\n\n## Clarifying questions you should ask first\n1. Is this intended to be LRU or FIFO?\n2. Are keys hashable / comparable?\n3. Single-threaded?\n4. Do we need O(1) or is O(n) acceptable for the fix in-interview?\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Reproduce | Trace get/put sequence that exceeds capacity or evicts wrong key |\n| Root cause | `order` allows duplicates; eviction pops stale indices |\n| Fix | Remove previous key occurrences on refresh **or** use DLL+map |\n\n## Reference fix (clear O(n) acceptable mid-interview; then note O(1))\n```python\nclass FixedCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.data: dict = {}\n        self.order: list = []\n\n    def get(self, key):\n        if key not in self.data:\n            return None\n        self.order.remove(key)  # O(n)\n        self.order.append(key)\n        return self.data[key]\n\n    def put(self, key, value):\n        if key in self.data:\n            self.order.remove(key)\n        self.data[key] = value\n        self.order.append(key)\n        while len(self.data) > self.capacity:\n            old = self.order.pop(0)\n            del self.data[old]\n```\n\nStaff+ then says: \"For O(1), switch to HashMap + doubly linked list \u2014 see coding/01.\"\n\n## Verbal tests to narrate\n1. capacity=2; put 1, put 2, get 1, put 3 \u2014 buggy may delete wrong key / grow\n2. After fix: 2 evicted, 1 and 3 remain\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| Debug narrative | Hypothesis \u2192 minimal repro \u2192 fix \u2192 complexity cost |\n| Production | Metrics on size vs capacity; invariant asserts in tests |\n| Why bugs survive | Missing property tests for eviction |\n\n## What not to discuss\n- Rewriting the whole service mesh\n- Silent \"I'd just use Redis\" without explaining the local bug",
+    "level_criteria": {
+      "mid": "Finds one bug with hints.",
+      "senior": "Finds both; provides working fix.",
+      "staff_plus": "Explains invariant, complexity trade-off, better structure.",
+      "principal": "Connects to review culture / invariant testing in real caches."
+    },
+    "related_deep_dives": [
+      "01-lru-cache-with-concurrency.md",
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/09-design-inmemory-pubsub",
+    "title": "Design an in-memory pub/sub (LLD in code)",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Implement an in-process pub/sub: - `subscribe(topic, handler)` \u2192 subscription id - `unsubscribe(sub_id)` - `publish(topic, message)` \u2014 delivers to current subscribers Handlers may be slow; define semantics.",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nLow-level design / coding hybrid: API design + concurrency. Staff+ shows **subscription lifecycle**, backpressure, and what is explicitly out of scope (persistence, cross-process).\n\n## Problem\nImplement an in-process pub/sub:\n\n- `subscribe(topic, handler)` \u2192 subscription id\n- `unsubscribe(sub_id)`\n- `publish(topic, message)` \u2014 delivers to current subscribers\n\nHandlers may be slow; define semantics.\n\n## Clarifying questions you should ask first\n1. Sync vs async delivery?\n2. If handler throws \u2014 continue others?\n3. Subscribe during publish \u2014 see message?\n4. Ordering guarantees per topic?\n5. Backpressure when handlers are slow?\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | Dict topic\u2192list handlers; call inline |\n| Correct | Sub ids; copy subscriber list under lock before dispatch |\n| Staff+ | Queue per subscriber; drop/block policies; metrics |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nfrom dataclasses import dataclass, field\nfrom threading import RLock\nfrom typing import Callable, DefaultDict\nfrom collections import defaultdict\nimport itertools\n\nHandler = Callable[[str], None]\n\n@dataclass\nclass _Sub:\n    topic: str\n    handler: Handler\n\nclass PubSub:\n    def __init__(self) -> None:\n        self._lock = RLock()\n        self._subs: dict[int, _Sub] = {}\n        self._by_topic: DefaultDict[str, set[int]] = defaultdict(set)\n        self._ids = itertools.count(1)\n\n    def subscribe(self, topic: str, handler: Handler) -> int:\n        with self._lock:\n            sid = next(self._ids)\n            self._subs[sid] = _Sub(topic, handler)\n            self._by_topic[topic].add(sid)\n            return sid\n\n    def unsubscribe(self, sub_id: int) -> None:\n        with self._lock:\n            sub = self._subs.pop(sub_id, None)\n            if sub:\n                self._by_topic[sub.topic].discard(sub_id)\n\n    def publish(self, topic: str, message: str) -> None:\n        with self._lock:\n            ids = list(self._by_topic.get(topic, ()))\n            handlers = [self._subs[i].handler for i in ids if i in self._subs]\n        for h in handlers:  # outside lock \u2014 avoid deadlocks / long critical sections\n            try:\n                h(message)\n            except Exception:\n                # Staff+: log/metric; continue\n                continue\n```\n\n**Complexity:** subscribe/unsubscribe O(1); publish O(subscribers).\n\n## Verbal tests to narrate\n1. Two subs same topic both receive\n2. Unsubscribe stops delivery\n3. Handler exception does not kill other handlers\n\n## Staff+ deep dive\n| Topic | Talking point |\n|-------|----------------|\n| Copy-on-publish | Snapshot under lock, dispatch outside |\n| Slow handlers | Per-sub queue + drop oldest / block publisher |\n| Process boundary | Redis Streams / NATS \u2014 different round |\n\n## What not to discuss\n- Exactly-once cross-datacenter messaging in this round\n- Holding the lock while running user handlers",
+    "level_criteria": {
+      "mid": "Dict of callbacks works single-threaded.",
+      "senior": "Thread-safe subscribe + snapshot publish.",
+      "staff_plus": "Exception isolation, backpressure policy, clear non-goals.",
+      "principal": "Relates to real event-bus ownership and failure budgets."
+    },
+    "related_deep_dives": [
+      "04-concurrent-bounded-queue.md",
+      "00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "coding/10-prefix-sum-subarray-patterns",
+    "title": "Prefix-sum subarray patterns (Staff+ follow-ups)",
+    "category": "coding",
+    "format": "tradeoff",
+    "generic_prompt": "Given `nums` and `k`, return the number of contiguous subarrays whose sum equals `k`.",
+    "framework_summary": "Clarify constraints \u2192 correct end-to-end solution \u2192 narrate complexity and tests \u2192 offer a Staff+ extension (concurrency, API contract, or failure mode) without turning a coding round into distributed system design. See Approach ladder and Staff+ deep dive below.",
+    "supporting_evidence_summary": "## Where this actually gets asked\nMeta/Google-style medium family: subarray sum equals K, etc. Staff+ is graded on **pattern recognition** and stating which variant they are solving \u2014 not memorizing 10 solutions blindly.\n\n## Problem (primary)\nGiven `nums` and `k`, return the number of contiguous subarrays whose sum equals `k`.\n\n## Clarifying questions you should ask first\n1. Negatives allowed? (yes \u2192 can't use simple sliding window)\n2. Empty subarray count?\n3. Integer overflow concerns?\n4. Follow-up variants expected?\n\n## Approach ladder\n| Step | Idea |\n|------|------|\n| Brute | All i..j sums \u2014 O(n\u00b2) |\n| Correct | Prefix sums + hash map of counts \u2014 O(n) |\n| Staff+ | Name sibling patterns and when window applies |\n\n## Reference solution (Python)\n```python\nfrom __future__ import annotations\nfrom collections import defaultdict\n\ndef subarray_sum_equals_k(nums: list[int], k: int) -> int:\n    pref = 0\n    seen: dict[int, int] = defaultdict(int)\n    seen[0] = 1\n    ans = 0\n    for x in nums:\n        pref += x\n        ans += seen[pref - k]\n        seen[pref] += 1\n    return ans\n```\n\n**Complexity:** O(n) time; O(n) space.\n\n## Verbal tests to narrate\n1. [1,1,1], k=2 \u2192 2\n2. [1,2,3], k=3 \u2192 2 ([1,2], [3])\n3. Zeros / negatives if in prompt\n\n## Pattern table (Staff+ talking track)\n| Variant | Tool |\n|---------|------|\n| Sum equals k (with negatives) | Prefix + hashmap |\n| Binary array / at most K zeros | Sliding window |\n| Shortest subarray sum \u2265 K (positives) | Window or deque on prefixes |\n| Subarray sum divisible by k | Prefix mod k map |\n\n## What not to discuss\n- Jumping to segment trees for this medium\n- Using sliding window when negatives are allowed (wrong)",
+    "level_criteria": {
+      "mid": "O(n\u00b2) works.",
+      "senior": "Prefix + map; explains why.",
+      "staff_plus": "Chooses correct pattern family; states when window fails.",
+      "principal": "Relates to real analytics / billing aggregation correctness."
+    },
+    "related_deep_dives": [
+      "00-staff-plus-coding-bar.md",
+      "../staff-plus-interview-craft/01-what-staff-plus-actually-signals.md"
+    ]
+  },
+  {
+    "question_id": "staff-plus-interview-craft/01-what-staff-plus-actually-signals",
+    "title": "What Staff+ actually signals in interviews",
+    "category": "staff-plus-interview-craft",
+    "format": "tradeoff",
+    "generic_prompt": "\"How is a Staff / Principal interview different from Senior \u2014 and what are interviewers listening for?\"",
+    "framework_summary": "Staff+ loops still include coding, system design, and behavioral rounds. The **weight and signal** change:\n\n| Round | Senior signal | Staff+ / Principal signal |\n|-------|---------------|---------------------------|\n| Coding | Correct medium problem, clean code | End-to-end solution + complexity aloud + tests narrated + **when to stop optimizing** |\n| System design | Components that work | Trade-offs with numbers, failure modes, **org/multi-team blast radius** |\n| Behavioral | \"I shipped X\" | \"I changed how the org ships\" \u2014 leverage, not heroics |\n| Cross-cutting | Depth in one area | Judgment under ambiguity; questions you ask before answering |\n\nAt Staff+, interviewers are hiring someone who **reduces ambiguity for others**. Speed-coding and buzzword architecture without constraints are downlevel signals.",
+    "supporting_evidence_summary": "## What to talk about (high leverage)\n| Topic | Why it lands |\n|-------|----------------|\n| Constraints first (SLA, cost, tenancy, compliance) | Shows you design under reality |\n| Explicit trade-offs with a chosen default | Staff+ owns the decision, not a menu |\n| Failure modes and operability | Production ownership |\n| How you'd roll out / measure success | Execution, not slides |\n| What you'd defer and why | Scope control |\n\n## What is unnecessary (or harmful)\n| Anti-pattern | Why it hurts |\n|--------------|--------------|\n| Jumping to Kafka/K8s before requirements | Looks like pattern matching, not thinking |\n| Optimizing Big-O before a correct solution | Senior trap; Staff+ still needs working code first |\n| Claiming \"we always use X at FAANG\" without context | Unverifiable and brittle |\n| Designing a distributed system in a 45-min coding round | Wrong round; wastes the clock |\n| Reciting STAR stories with no metrics or risk | Behavioral without evidence |\n\n## Interview-ready summary\nStaff+ is judged on **judgment under constraints**. Show the decision, the discarded alternatives, and how you'd know you were wrong.",
+    "level_criteria": {
+      "mid": "Completes the asked task; needs prompting for trade-offs.",
+      "senior": "Solid design/code; trade-offs when asked; owns a service-sized scope.",
+      "staff_plus": "Unprompted constraints, blast radius, and \"what we won't do\"; multi-team impact.",
+      "principal": "Sets reusable principles others can apply; ties technical choices to org strategy and risk."
+    },
+    "related_deep_dives": [
+      "02-questions-you-should-ask.md",
+      "03-what-not-to-waste-time-on.md",
+      "../coding/00-staff-plus-coding-bar.md"
+    ]
+  },
+  {
+    "question_id": "staff-plus-interview-craft/02-questions-you-should-ask",
+    "title": "Questions you should ask in a Staff+ interview",
+    "category": "staff-plus-interview-craft",
+    "format": "tradeoff",
+    "generic_prompt": "\"What should I ask the interviewer \u2014 and when \u2014 if I'm interviewing for Staff or Principal?\"",
+    "framework_summary": "Asking sharp questions is itself a Staff+ signal. Weak questions waste the last five minutes; strong ones show how you'd operate on day one.\n\n### During a coding round (first 2\u20133 minutes)\n\n| Ask | Why |\n|-----|-----|\n| Input size / expected scale? | Chooses algorithm class |\n| Single-threaded or concurrent? | Avoids wrong API |\n| Mutability / in-place allowed? | Clarifies constraints |\n| Exact vs approximate OK? | Unlocks streaming / sampling approaches |\n| What should happen on invalid input? | API contract thinking |\n\n### During system design (first 5 minutes)\n\n| Ask | Why |\n|-----|-----|\n| Who is the primary user / tenant model? | Multi-tenant vs single |\n| Read/write ratio and latency SLO? | Cache vs consistency |\n| Cost ceiling or GPU budget? | FinOps as a first-class constraint |\n| Compliance / data residency? | Architecture-shaping, not a footnote |\n| What already exists in the org? | Avoid greenfield fantasy |\n\n### With the hiring manager / bar raiser\n\n| Ask | Why |\n|-----|-----|\n| Where does this org need Staff+ leverage most in the next 12\u201324 months? | Role fit |\n| How is technical strategy set across teams? | Principal operating model |\n| What does success look like in 6 months for this seat? | Scope clarity |\n| How do you handle disagreement between Staff ICs and product? | Influence without authority |\n| What recently went wrong in production that changed how you build? | Culture of learning |",
+    "supporting_evidence_summary": "## Weak questions (skip these)\n| Question | Problem |\n|----------|---------|\n| \"What tech stack do you use?\" (alone) | Too generic; ask about constraints instead |\n| \"How many hours do people work?\" | Fine later; not a Staff signal |\n| \"Did I do well?\" | Puts interviewer in an awkward spot |\n\n## Interview-ready summary\nBudget questions like design decisions: **clarify constraints early, probe org leverage late**.",
+    "level_criteria": {
+      "mid": "Asks clarifying questions when stuck.",
+      "senior": "Clarifies requirements before coding/designing.",
+      "staff_plus": "Asks questions that change the design; probes blast radius and org context.",
+      "principal": "Asks about strategy, incentives, and how decisions stick across teams."
+    },
+    "related_deep_dives": [
+      "01-what-staff-plus-actually-signals.md",
+      "03-what-not-to-waste-time-on.md"
+    ]
+  },
+  {
+    "question_id": "staff-plus-interview-craft/03-what-not-to-waste-time-on",
+    "title": "What not to waste time on in Staff+ interviews",
+    "category": "staff-plus-interview-craft",
+    "format": "tradeoff",
+    "generic_prompt": "\"What should I deliberately *not* spend time on in a Staff / Principal loop?\"",
+    "framework_summary": "Time is the scarce resource. Staff+ candidates lose offers by optimizing the wrong layer.\n\n| Round | Do spend time | Do not spend time |\n|-------|---------------|-------------------|\n| Coding | Correctness, clarity, tests, complexity | Premature distributed design, micro-optimizations |\n| System design | Requirements, 1\u20132 deep dives, failure modes | Drawing every microservice box |\n| Behavioral | One story with metrics + risk | Five shallow stories |\n| Closing | 2\u20133 high-signal questions | Comp negotiation in the technical round |",
+    "supporting_evidence_summary": "## Unnecessary discussion (common traps)\n1. **Naming every AWS service** \u2014 Interviewers care about properties (consistency, durability), not logo bingo.\n2. **LeetCode hard flex in a medium round** \u2014 If the problem is medium, ship medium well; then offer the Staff extension verbally.\n3. **Rewriting company history** \u2014 Don't invent \"at Google we always\u2026\" unless you can defend it.\n4. **Perfect UML** \u2014 Prefer a clear data flow and API contract.\n5. **Apologizing for not knowing a buzzword** \u2014 State the property you need and ask if a known tool is in play.\n\n## Timebox cheat sheet (45\u201360 min)\n| Phase | Coding | System design |\n|-------|--------|---------------|\n| Clarify | 3\u20135 min | 5\u20138 min |\n| Approach | 5 min | 8\u201310 min (high-level) |\n| Execute | 25\u201330 min | 20\u201325 min (1\u20132 deep dives) |\n| Test / failure | 5 min | 5\u20138 min |\n| Close / questions | 2\u20133 min | 2\u20133 min |\n\n## Interview-ready summary\n**Ship a clear decision under constraints.** Everything else is decoration.",
+    "level_criteria": {
+      "mid": "Finishes something working; may run out of time on polish.",
+      "senior": "Timeboxes; leaves tests/edge cases if needed but mentions them.",
+      "staff_plus": "Protects the clock for the highest-signal deep dive; narrates what was deferred.",
+      "principal": "Explicitly manages the interview agenda with the interviewer (\"I'd like 10 minutes on failure modes\")."
+    },
+    "related_deep_dives": [
+      "01-what-staff-plus-actually-signals.md",
+      "02-questions-you-should-ask.md",
+      "../coding/00-staff-plus-coding-bar.md"
     ]
   }
 ]

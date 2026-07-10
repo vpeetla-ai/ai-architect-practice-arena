@@ -6,8 +6,11 @@ time. Rerun this whenever the pinned playbook commit is bumped (see
 PLAYBOOK_COMMIT below); CI fails the build if any question in QUESTION_SLICE
 fails to parse, so a rubric gap is never silently shipped.
 
-Phase 3 scope: all 35 entries across all 5 playbook folders are supported, in
-three formats:
+Phase 3+ scope: all playbook folders are supported, including Staff+ coding
+and interview-craft entries (parsed with the tradeoff rubric shape so the
+existing Practice Arena grader can discover them without a fourth UI format).
+
+Formats:
 
 - **system_design** (`ai-system-design/`, `general-system-design/`,
   `cloud-architecture/`, 26 entries): the hellointerview-style shape —
@@ -18,12 +21,11 @@ three formats:
   generic, reusable "question, as it might actually be asked" section a
   practicing user answers with their own experience — the real
   Situation/Task/Action/Result stay as judge-reference/illustrative content.
-- **tradeoff** (`scalability-governance-tradeoffs/`, 4 entries): reasoning
-  frameworks. All 4 share "The question, as it might actually be asked" and
-  "The framework" headings, but the content between the framework and the
-  level-criteria section is NOT uniform across entries (1-2 differently-named
-  sections per entry) — extracted positionally via `_extract_between()`,
-  not by a shared heading pattern.
+- **tradeoff** (`scalability-governance-tradeoffs/`, `coding/`,
+  `staff-plus-interview-craft/`): reasoning frameworks and Staff+ coding/craft
+  guides that share "The question, as it might actually be asked" and
+  "The framework" headings. Middle content between framework and level
+  criteria is extracted positionally via `_extract_between()`.
 """
 
 from __future__ import annotations
@@ -74,6 +76,20 @@ QUESTION_SLICE: list[str] = [
     "scalability-governance-tradeoffs/02-build-vs-buy-shared-services.md",
     "scalability-governance-tradeoffs/03-centralize-vs-federate-governance.md",
     "scalability-governance-tradeoffs/04-build-vs-train-vs-finetune-foundation-model-strategy.md",
+    "coding/00-staff-plus-coding-bar.md",
+    "coding/01-lru-cache-with-concurrency.md",
+    "coding/02-rate-limiter-token-bucket.md",
+    "coding/03-time-based-kv-store.md",
+    "coding/04-concurrent-bounded-queue.md",
+    "coding/05-top-k-frequent-stream.md",
+    "coding/06-merge-k-sorted-iterators.md",
+    "coding/07-graph-clone-and-cycle-safe.md",
+    "coding/08-debug-broken-cache-eviction.md",
+    "coding/09-design-inmemory-pubsub.md",
+    "coding/10-prefix-sum-subarray-patterns.md",
+    "staff-plus-interview-craft/01-what-staff-plus-actually-signals.md",
+    "staff-plus-interview-craft/02-questions-you-should-ask.md",
+    "staff-plus-interview-craft/03-what-not-to-waste-time-on.md",
 ]
 
 _CATEGORY_FORMATS: dict[str, str] = {
@@ -82,6 +98,8 @@ _CATEGORY_FORMATS: dict[str, str] = {
     "cloud-architecture": "system_design",
     "behavioral": "behavioral",
     "scalability-governance-tradeoffs": "tradeoff",
+    "coding": "tradeoff",
+    "staff-plus-interview-craft": "tradeoff",
 }
 
 _LEVEL_KEYS = {
