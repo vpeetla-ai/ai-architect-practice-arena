@@ -7,7 +7,7 @@
 (API: [practice-arena-api.onrender.com](https://practice-arena-api.onrender.com))
 
 A mock-interview practice layer for [ai-architect-interview-playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook):
-write a real answer to one of its 35 questions, and get graded by **both OpenAI and Anthropic**
+write a real answer to one of its 49 questions, and get graded by **both OpenAI and Anthropic**
 against that entry's own real Staff+/Principal rubric — using your own API key, which is never
 stored on or sent to our servers.
 
@@ -27,11 +27,11 @@ direct browser calls; a minimal stateless proxy fixes it without ever storing a 
 
 | Component | State |
 |---|---|
-| Rubric parser (`scripts/build_rubrics.py`) | ✅ Real, tested — parses **35/35** playbook questions; CI-gated against silent gaps |
-| Backend (`backend/`) | ✅ Real, tested — verified via a real running HTTP server; pytest asserts 35 questions served |
+| Rubric parser (`scripts/build_rubrics.py`) | ✅ Real, tested — parses **49/49** playbook questions; CI-gated against silent gaps |
+| Backend (`backend/`) | ✅ Real, tested — verified via a real running HTTP server; pytest asserts 49 questions served |
 | Frontend (`frontend/`) | ✅ Real, tested — verified end-to-end in a real browser against both live provider APIs (with placeholder keys) |
-| Judge calibration (`content/calibration/`) | ✅ Live providers — **139/140** cases (35 questions × weak/strong × OpenAI+Anthropic); see [ADR-0001 Phase 3](docs/adr/0001-byok-judge-architecture.md) |
-| Coverage | **35/35** playbook questions across system design, cloud, general SD, behavioral (STAR), and trade-offs |
+| Judge calibration (`content/calibration/`) | ✅ Live providers — **139/140** cases on the original 35 (weak/strong × OpenAI+Anthropic); coding/craft added for practice, calibration expansion follow-up |
+| Coverage | **49/49** playbook questions across system design, cloud, general SD, behavioral (STAR), trade-offs, Staff+ coding, and interview craft |
 | Deployment | ✅ Live — frontend on Vercel, backend on Render (free tiers), verified end-to-end against the real deployed URLs, including the OpenAI proxy route responding correctly in Vercel's serverless environment |
 
 ## Architecture

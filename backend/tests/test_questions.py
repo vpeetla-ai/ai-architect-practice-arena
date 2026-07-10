@@ -1,6 +1,7 @@
 from practice_arena.questions import get_rubric, list_questions, load_rubrics
 
-EXPECTED_QUESTION_COUNT = 35  # Phase 3: all 5 playbook folders, all 3 formats
+EXPECTED_QUESTION_COUNT = 49  # 35 prior + 11 coding + 3 Staff+ craft (coding/craft use tradeoff shape)
+
 
 
 def test_load_rubrics_parses_the_real_launch_slice() -> None:
@@ -49,12 +50,13 @@ def test_every_tradeoff_rubric_has_the_framework_fields() -> None:
         assert rubric["supporting_evidence_summary"].strip(), f"{rubric['question_id']}: empty supporting_evidence_summary"
 
 
-def test_rubric_formats_cover_all_35_with_expected_counts() -> None:
+def test_rubric_formats_cover_all_with_expected_counts() -> None:
     rubrics = load_rubrics()
     counts: dict[str, int] = {}
     for rubric in rubrics:
         counts[rubric["format"]] = counts.get(rubric["format"], 0) + 1
-    assert counts == {"system_design": 26, "behavioral": 5, "tradeoff": 4}
+    # tradeoff = 4 governance + 11 coding + 3 craft
+    assert counts == {"system_design": 26, "behavioral": 5, "tradeoff": 18}
 
 
 def test_list_questions_omits_level_criteria() -> None:

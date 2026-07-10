@@ -5,8 +5,8 @@ export default function HomePage() {
         <p className="category-label" style={{ marginTop: 0 }}>Interview practice</p>
         <h1>AI Architect Practice Arena</h1>
         <p>
-          Pick one of <strong>35 playbook questions</strong> (system design, cloud, general SD,
-          behavioral STAR, and trade-offs) from the sidebar — sourced from{" "}
+          Pick one of <strong>49 playbook questions</strong> (system design, cloud, general SD,
+          behavioral STAR, trade-offs, Staff+ coding, and interview craft) from the sidebar — sourced from{" "}
           <a href="https://github.com/vpeetla-ai/ai-architect-interview-playbook" target="_blank" rel="noreferrer">
             ai-architect-interview-playbook
           </a>

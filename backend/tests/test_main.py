@@ -11,11 +11,11 @@ def test_health() -> None:
     assert response.json() == {"status": "ok", "service": "practice-arena-api"}
 
 
-def test_questions_endpoint_returns_all_35() -> None:
+def test_questions_endpoint_returns_all_49() -> None:
     response = client.get("/questions")
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 35
+    assert len(body) == 49
     assert all("level_criteria" not in q for q in body)
 
 
