@@ -1,6 +1,6 @@
 from practice_arena.questions import get_rubric, list_questions, load_rubrics
 
-EXPECTED_QUESTION_COUNT = 49  # 35 prior + 11 coding + 3 Staff+ craft (coding/craft use tradeoff shape)
+EXPECTED_QUESTION_COUNT = 62  # 49 prior + 13 P0-P2 gap fills
 
 
 
@@ -57,7 +57,7 @@ def test_rubric_formats_cover_all_with_expected_counts() -> None:
     for rubric in rubrics:
         counts[rubric["format"]] = counts.get(rubric["format"], 0) + 1
     # tradeoff = 4 governance + 11 coding + 3 craft
-    assert counts == {"system_design": 26, "behavioral": 5, "tradeoff": 18}
+    assert counts == {"system_design": 34, "behavioral": 7, "tradeoff": 21}
 
 
 def test_list_questions_omits_level_criteria() -> None:

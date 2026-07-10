@@ -743,5 +743,227 @@
       "applied_example": "Every service I've built that calls an LLM at all has used a vendor API rather than a model trained or fine-tuned in-house, because the differentiation that work actually needed to prove was in the governance, orchestration, and cost-metering layers around the model call, not in model capability itself -- training or fine-tuning a model would have required data and compute resources genuinely out of scope for what those layers needed to demonstrate. Separately, a serving-layer simulation project I worked on modeled real inference-serving mechanics (batching, memory management) without needing real trained weights at all, since the goal was proving serving-architecture understanding cheaply, a distinct scope decision from the model-strategy question but motivated by the same resource-constraint reasoning."
     },
     "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "ai-system-design/14-chatgpt-style-conversational-service",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Start a conversation, send messages, receive streamed token responses. - Persist conversation history; support regenerate / edit-and-resend. - Choose among models (fast/cheap vs high-quality); optional file/image attachments in scope. - Enforce free vs paid usage limits without silently dropping messages. **Non-functional** - Interactive TTFT target ~200ms P50; stream tokens (SSE), do not buffer full answers. - Multi-million concurrent sessions; conversation store must survive replica restarts. - Safety on input and output; cost per conversation is a first-class constraint. - Graceful degradation: queue or shed load, never corrupt session state.",
+      "core_entities": "- **Conversation / Session**: id, owner, model preference, created_at, retention policy. - **Message**: role (system/user/assistant), content, parent_message_id (for regenerate branches), token counts. - **Generation job**: request tied to a message, priority, stream cursor, cancel token. - **Quota ledger**: tenant/user remaining tokens/RPM for the billing period. - **Safety decision**: input/output flags, policy_version, allow/block/review.",
+      "api_interface": "Auth: `Authorization: Bearer <user_token>`. Streaming is the default product path. Staff+ callout: regenerate creates a **branch**, not an overwrite \u2014 history and audit need both.",
+      "data_flow": "Client opens/continues a conversation; gateway checks auth+quota; safety inspects input; inference streams tokens; output safety runs; messages persist; usage meters.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Compose existing building blocks deliberately: inference ([01](01-llm-inference-serving-at-scale.md)), realtime delivery patterns ([../general-system-design/02-realtime-chat-messaging-at-scale.md](../general-system-design/02-realtime-chat-messaging-at-scale.md)), safety ([05](05-content-moderation-safety-system.md)), multi-tenant quotas ([09](09-multi-tenant-ai-platform-architecture.md)). The Staff+ signal is **product composition**, not reinventing each subsystem. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "ai-system-design/15-ai-coding-assistant",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Inline ghost-text completions as the user types (prefix + suffix aware). - Optional chat/agent mode: explain code, multi-file edit proposals, run tools in a sandbox. - Repo-aware context: current file, open tabs, symbols, similar code retrieval. - Privacy: secrets never leave the IDE; enterprise may require on-prem / no-train. **Non-functional** - Inline TTFT budget typically 50\u2013200ms P99 feel; cancel abandoned requests on keystroke. - Index large monorepos without blocking the editor; incremental re-index on edit. - Acceptance rate / persistence metrics for product quality, not just HumanEval offline. - License and vulnerability filters on suggestions.",
+      "core_entities": "- **Completion request**: cursor position, prefix, suffix, language, debounce_id, cancel_token. - **Context pack**: budgeted snippets (current file, imports, retrieved symbols) + token budget. - **Repo index**: AST symbols (tree-sitter), embeddings, file hashes, incremental dirty set. - **Suggestion**: text, range, model_id, latency_ms, filter_flags. - **Acceptance event**: shown / accepted / persisted_after_N_min (online eval).",
+      "api_interface": "IDE plugin is the primary client. Separate hot path (complete) from cold path (index/chat). Staff+ callout: `/complete` must be cancelable; wasted GPU on abandoned keystrokes is a cost bug.",
+      "data_flow": "Keystroke \u2192 debounce \u2192 context assemble (local redaction) \u2192 complete API \u2192 stream suggestion \u2192 telemetry. Index path is async and separate.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "ai-system-design/16-llm-customer-support-assistant",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Answer FAQs from a knowledge base with citations. - Take allowed actions via tools (order lookup, cancel, refund) under policy. - Escalate to human agents with full conversation + reason codes. - Multi-turn memory of the case; optional multilingual. **Non-functional** - High containment (resolve without human) without sacrificing CSAT. - Hallucination of policy/order state is unacceptable \u2014 ground or escalate. - Action tools are side effects: gateway + HITL above risk thresholds. - Audit trail for regulated industries (payments, healthcare).",
+      "core_entities": "- **Case / Ticket**: customer_id, channel, status, assignee (bot|human), priority. - **Turn**: message, intent, confidence, citations[], tool_calls[]. - **Knowledge article**: versioned content, locale, effective_dates. - **Tool policy**: tool_name, risk_tier, approval_required, rate limits. - **Escalation**: reason_code, transcript_ref, SLA clock start.",
+      "api_interface": "Staff+ callout: never let the LLM invent order state \u2014 tools are the source of truth.",
+      "data_flow": "Message \u2192 intent route (FAQ vs agent vs escalate) \u2192 retrieve KB \u2192 generate grounded reply \u2192 optional tool via gateway \u2192 escalate if confidence/policy requires.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Reuse RAG ([02](02-rag-platform-at-scale.md)) and gateway ([03](03-agent-tool-use-orchestration-platform.md)) patterns; the product-specific hard parts are escalation quality and action policy. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "cloud-architecture/07-llm-gateway-semantic-cache-model-router",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Single ingress for chat/completions across multiple model providers. - Route by policy: tenant, latency class, cost class, capability (tools, vision). - Optional semantic cache for idempotent / FAQ-like prompts. - Central auth, rate limits, usage metering, and kill switches. **Non-functional** - P99 overhead of the gateway itself is small vs model latency. - Cache must not serve personalized or safety-sensitive answers across users. - Provider outages trigger failover without thundering herds. - FinOps: per-tenant budgets enforced before tokens burn.",
+      "core_entities": "- **Route policy**: match rules \u2192 model/provider, timeout, retry, fallback chain. - **Cache key**: tenant_scope + embedding(prompt) + model_semver + policy_version. - **Usage event**: tenant, model, tokens_in/out, cached_hit, cost_usd. - **Provider adapter**: normalized request/response + error taxonomy.",
+      "api_interface": "Staff+ callout: default `cache=forbid` for authenticated user-specific prompts; opt-in for safe classes.",
+      "data_flow": "Client \u2192 auth/quota \u2192 route policy \u2192 cache lookup (if allowed) \u2192 provider adapter \u2192 meter \u2192 response. Failover walks the fallback chain.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Overlaps [../ai-system-design/09](../ai-system-design/09-multi-tenant-ai-platform-architecture.md) and [../scalability-governance-tradeoffs/01](../scalability-governance-tradeoffs/01-cost-vs-latency-vs-safety.md); this entry focuses on the **gateway product** itself. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "general-system-design/08-notification-system",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Accept notification events from producers (order shipped, mention, security alert). - Deliver via user-preferred channels with templates. - Honor quiet hours, per-category opt-outs, and frequency caps. - Support digests (batch) and realtime (immediate) priorities. **Non-functional** - At-least-once delivery with idempotent providers; no silent drops for security alerts. - Fan-out to millions of recipients for one event (celebrity / flash sale) without melting producers. - Per-channel retries, DLQ, and observability. - P99 enqueue latency low; end-to-end delivery SLO varies by priority.",
+      "core_entities": "- **Notification request**: idempotency_key, user_id(s) or segment, template_id, priority, payload. - **Preference**: user_id, channel, category, enabled, quiet_hours. - **Delivery attempt**: channel, provider_message_id, status, attempt_n. - **Template**: localized body, required variables, channel constraints.",
+      "api_interface": "Staff+ callout: security category ignores marketing opt-outs; encode that in policy, not hope.",
+      "data_flow": "Producer enqueues \u2192 preference filter \u2192 channel router \u2192 provider adapters \u2192 receipt/webhook updates status.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "general-system-design/09-url-shortener",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Create a short code for a long URL; optional custom alias and TTL. - Redirect short URL to long URL quickly. - Basic click analytics (count, optional referrer/country aggregates). **Non-functional** - Extremely read-heavy (\u2248100:1); redirects P99 < 10\u201350ms with cache. - Unique short codes; no collisions serving wrong destinations. - High availability for redirects even if write path is degraded. - Abuse: malware URLs, spam creation rate limits.",
+      "core_entities": "- **Link**: short_code, long_url, owner_id, created_at, expires_at, status. - **Click event**: short_code, ts, metadata (coarse). - **Alias reservation**: custom code lock during create.",
+      "api_interface": "Staff+ callout: say whether redirects are 301 (cacheable, weaker analytics) or 302 (accurate counts).",
+      "data_flow": "Create allocates code \u2192 persist mapping \u2192 cache. Redirect reads cache then DB; async click log.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "general-system-design/10-video-streaming-platform",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Upload video (resumable); process into multiple renditions. - Playback with adaptive bitrate (HLS/DASH). - Metadata: title, thumbnails, visibility; basic view counts. - Optional: live streaming as a follow-up (different design \u2014 call out). **Non-functional** - Upload reliability for multi-GB files; processing async. - Startup time and rebuffering SLOs globally via CDN. - Storage cost dominates \u2014 lifecycle cold storage for rarely watched. - Copyright / abuse takedown path.",
+      "core_entities": "- **Video asset**: id, owner, status (uploading|processing|ready|failed), duration. - **Rendition**: resolution, bitrate, codec, object_uri, playlist_uri. - **Playback session**: user, CDN edge, chosen rendition ladder. - **Processing job**: ffmpeg pipeline steps, retries.",
+      "api_interface": "Staff+ callout: separate **upload/origin** from **playback CDN** trust boundaries.",
+      "data_flow": "Client uploads to object storage \u2192 complete \u2192 transcoder workers produce renditions + HLS playlist \u2192 publish to CDN \u2192 player fetches ABR ladder; views counted asynchronously.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "general-system-design/11-web-crawler",
+    "weak_answer": {
+      "requirements": "Users use the system and it should work at scale.",
+      "core_entities": "Users, requests, a database.",
+      "api_interface": "POST /do-thing {input} -> {output}",
+      "data_flow": "Client calls API, server does work, returns response.",
+      "high_level_design_text": "Load balancer to app servers to a database.",
+      "high_level_design_mermaid": "",
+      "deep_dives": "Add more servers if slow."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "requirements": "**Functional** - Given seed URLs, discover and fetch pages continuously. - Extract links; respect robots.txt and crawl-delay. - Store raw + parsed content; emit change detection. - Prioritize important / fresh URLs. **Non-functional** - Politeness: per-host rate limits; no accidental DDoS. - Scale to billions of URLs; exactly-once-ish fetch semantics via dedupe. - Fault tolerant workers; poison URL isolation. - Legal/ToS constraints \u2014 stay in allowed domains when scoped.",
+      "core_entities": "- **URL frontier**: prioritized queue of URLs to fetch with next_fetch_at. - **Host lease**: per-domain token bucket / crawl-delay state. - **Document**: content_hash, fetched_at, canonical_url, outlinks[]. - **Robots rules**: cached per host with TTL.",
+      "api_interface": "Control-plane APIs for operators; workers pull work. Staff+ callout: politeness is a **correctness** requirement, not an optimization.",
+      "data_flow": "Seeds \u2192 frontier \u2192 host-polite scheduler \u2192 fetch \u2192 parse \u2192 dedupe store \u2192 enqueue outlinks.",
+      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "high_level_design_mermaid": "",
+      "deep_dives": " "
+    },
+    "expected_strong_level": "principal"
+  },
+  {
+    "question_id": "behavioral/06-influence-without-authority",
+    "weak_answer": {
+      "situation": "There was a disagreement at work.",
+      "task": "I needed to get people to agree.",
+      "action": "I told them my idea in a meeting.",
+      "result": "They agreed and we moved on.",
+      "follow_up_response": "I would escalate next time."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "situation": "Across the vpeetla-ai org, multiple demos and platforms were independently inventing adjacent patterns for governance of side effects (publish, notify, tool calls) and for agent skills install \u2014 each repo slightly different, each \"working,\" none shared. No single team owned \"platform standards,\" and nobody reported to anyone else across those repos.",
+      "task": "Get independent repo owners to adopt a **shared** approach (AegisAI-style gateway before irreversible actions; shared skills install from `vpeetla-ai-skills`) without a mandate from above and without blocking anyone's launch calendar.",
+      "action": "I treated influence as making the right path easier than the wrong one: 1. **Wrote the constraint down** in org agent instructions (`AGENTS.md` / skills): side effects    require gateway or HITL; skills install is one scripted path \u2014 so new work defaulted to the    shared pattern instead of inventing a fourth variant. 2. **Shipped reference implementations** in repos people already cared about (content-factory    publish HITL, practice-arena/playbook as graded artifacts) rather than a slide deck asking for    adoption. 3. **Cross-linked ADRs and interview playbook entries** so the \"why\" lived next to running code \u2014    reviewers could cite a real decision, not a preference. 4. **Avoided forcing rewrites mid-launch** \u2014 new work adopted the standard; migrations were    opportunistic. That kep",
+      "result": "New agent work in the org consistently routes irreversible actions through gateway/HITL patterns, and skills bootstrap is a single documented install path. Divergence still exists in older corners (honest: influence was partial), but the default for net-new systems stopped fragmenting.",
+      "follow_up_response": "**\"What did you do when a team still refused?\"** Answer: I narrowed the ask to the next greenfield surface instead of demanding a rewrite, offered to pair on the first gateway integration, and documented the risk of divergence in the ADR so the cost was visible if they revisited later. Forcing a political win that reverts after the meeting is not influence."
+    },
+    "expected_strong_level": "staff_plus"
+  },
+  {
+    "question_id": "behavioral/07-technical-bet-that-failed",
+    "weak_answer": {
+      "situation": "There was a disagreement at work.",
+      "task": "I needed to get people to agree.",
+      "action": "I told them my idea in a meeting.",
+      "result": "They agreed and we moved on.",
+      "follow_up_response": "I would escalate next time."
+    },
+    "expected_weak_level": "mid",
+    "strong_answer": {
+      "situation": "While expanding AI architect interview prep and demo surfaces, it was tempting to treat **every** aggregator-attributed \"Company X asks Y\" claim as a first-class playbook entry and to ship UI/demo paths that looked complete (multi-platform publish, broad company attributions) before the underlying API or citation reality supported them.",
+      "task": "Make a call on scope and sourcing that would either (a) look more impressive on day one or (b) stay honest under Staff+/Principal scrutiny \u2014 and reverse course when evidence showed the bet was wrong.",
+      "action": "Early drafts absorbed company-attributed interview questions and cost figures from SEO/prep blogs. A research pass then **failed the bet**: several attributions had no primary citation; one circulating cost figure looked fabricated; at least one \"Google Docs\" attribution traced to a different company. The reverse decision was explicit: 1. **Strip or relabel** unverified company tags to \"archetype\" language in the playbook. 2. **Document exclusions** in-entry (e.g. disaster-recovery and cloud entries call out rejected    fabricated sources) instead of quietly deleting without a trail. 3. **Prefer disclosed partial scope** in products (real OAuth publish only where APIs are real;    copy-draft elsewhere) over fake completeness \u2014 same failure mode as believing unverified    interview lore. Th",
+      "result": "The playbook's sourcing posture became a feature: grounded-or-labeled, with rejected fabrications called out. Demo scope stayed honest. The failed bet (trust secondary sources at face value) was converted into a repeatable research checklist rather than a one-off embarrassment.",
+      "follow_up_response": "**\"How do you keep this from happening again?\"** Answer: require a primary source or an explicit archetype label before a company name ships; treat prep blogs as leads, not evidence; same bar as production incident RCAs \u2014 write down what fooled you."
+    },
+    "expected_strong_level": "staff_plus"
   }
 ]
