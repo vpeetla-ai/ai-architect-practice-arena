@@ -27,11 +27,11 @@ direct browser calls; a minimal stateless proxy fixes it without ever storing a 
 
 | Component | State |
 |---|---|
-| Rubric parser (`scripts/build_rubrics.py`) | ✅ Real, tested — parses 10 questions cleanly, CI-gated against silent gaps |
-| Backend (`backend/`) | ✅ Real, tested — verified via a real running HTTP server, 9 passing pytest tests |
+| Rubric parser (`scripts/build_rubrics.py`) | ✅ Real, tested — parses **35/35** playbook questions; CI-gated against silent gaps |
+| Backend (`backend/`) | ✅ Real, tested — verified via a real running HTTP server; pytest asserts 35 questions served |
 | Frontend (`frontend/`) | ✅ Real, tested — verified end-to-end in a real browser against both live provider APIs (with placeholder keys) |
-| Judge calibration (`content/calibration/`) | ✅ Run against live providers, **40/40 passed** — see [docs/adr/0001](docs/adr/0001-byok-judge-architecture.md) (a real bug was found and fixed on the first run: OpenAI's adapter broke outside a browser context) |
-| Coverage | 10 of 35 playbook questions (the 3 folders sharing one rubric shape); `behavioral/` and `scalability-governance-tradeoffs/` need a different rubric design |
+| Judge calibration (`content/calibration/`) | ✅ Live providers — **139/140** cases (35 questions × weak/strong × OpenAI+Anthropic); see [ADR-0001 Phase 3](docs/adr/0001-byok-judge-architecture.md) |
+| Coverage | **35/35** playbook questions across system design, cloud, general SD, behavioral (STAR), and trade-offs |
 | Deployment | ✅ Live — frontend on Vercel, backend on Render (free tiers), verified end-to-end against the real deployed URLs, including the OpenAI proxy route responding correctly in Vercel's serverless environment |
 
 ## Architecture
