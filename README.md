@@ -83,12 +83,12 @@ OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... npm run calibrate
 
 **Business function:** BYOK mock-interview judge UI over playbook rubrics (OpenAI + Anthropic).
 
-Staff+ prep crosswalk — [playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook) · [study UI](https://ai-architect-interview-playbook-9xs.vercel.app) · [Practice Arena](https://ai-architect-practice-arena.vercel.app) · [org matrix](https://github.com/vpeetla-ai/ai-architecture-portfolio/blob/main/docs/REPO_INTERVIEW_MAP.md). Only entries this repo honestly exercises.
+Staff+ prep crosswalk — [playbook](https://github.com/vpeetla-ai/ai-architect-interview-playbook) · [study UI](https://ai-architect-interview-playbook.vercel.app) · [Practice Arena](https://ai-architect-practice-arena.vercel.app) · [org matrix](https://github.com/vpeetla-ai/ai-architecture-portfolio/blob/main/docs/REPO_INTERVIEW_MAP.md). Only entries this repo honestly exercises.
 
 | Category | Entry | Fit |
 |----------|-------|-----|
-| System design | [LLM eval & observability](https://ai-architect-interview-playbook-9xs.vercel.app/q/ai-system-design/07-llm-evaluation-observability-platform) ([md](https://github.com/vpeetla-ai/ai-architect-interview-playbook/blob/main/ai-system-design/07-llm-evaluation-observability-platform.md)) | Partial — LLM-as-judge scoring loop |
-| Trade-offs | [Build vs buy shared services](https://ai-architect-interview-playbook-9xs.vercel.app/q/scalability-governance-tradeoffs/02-build-vs-buy-shared-services) ([md](https://github.com/vpeetla-ai/ai-architect-interview-playbook/blob/main/scalability-governance-tradeoffs/02-build-vs-buy-shared-services.md)) | BYOK vs hosted judge; dual-provider calibration |
+| System design | [LLM eval & observability](https://ai-architect-interview-playbook.vercel.app/q/ai-system-design/07-llm-evaluation-observability-platform/) ([md](https://github.com/vpeetla-ai/ai-architect-interview-playbook/blob/main/ai-system-design/07-llm-evaluation-observability-platform.md)) | Partial — LLM-as-judge scoring loop |
+| Trade-offs | [Build vs buy shared services](https://ai-architect-interview-playbook.vercel.app/q/scalability-governance-tradeoffs/02-build-vs-buy-shared-services/) ([md](https://github.com/vpeetla-ai/ai-architect-interview-playbook/blob/main/scalability-governance-tradeoffs/02-build-vs-buy-shared-services.md)) | BYOK vs hosted judge; dual-provider calibration |
 
 ## Related
 
