@@ -826,13 +826,13 @@
     },
     "expected_weak_level": "mid",
     "strong_answer": {
-      "requirements": "**Functional** - Single ingress for chat/completions across multiple model providers. - Route by policy: tenant, latency class, cost class, capability (tools, vision). - Optional semantic cache for idempotent / FAQ-like prompts. - Central auth, rate limits, usage metering, and kill switches. **Non-functional** - P99 overhead of the gateway itself is small vs model latency. - Cache must not serve personalized or safety-sensitive answers across users. - Provider outages trigger failover without thundering herds. - FinOps: per-tenant budgets enforced before tokens burn.",
-      "core_entities": "- **Route policy**: match rules \u2192 model/provider, timeout, retry, fallback chain. - **Cache key**: tenant_scope + embedding(prompt) + model_semver + policy_version. - **Usage event**: tenant, model, tokens_in/out, cached_hit, cost_usd. - **Provider adapter**: normalized request/response + error taxonomy.",
-      "api_interface": "Staff+ callout: default `cache=forbid` for authenticated user-specific prompts; opt-in for safe classes.",
-      "data_flow": "Client \u2192 auth/quota \u2192 route policy \u2192 cache lookup (if allowed) \u2192 provider adapter \u2192 meter \u2192 response. Failover walks the fallback chain.",
-      "high_level_design_text": "Maps to **functional** requirements from step 1 \u2014 the component architecture that makes the API and data flow real. Overlaps [../ai-system-design/09](../ai-system-design/09-multi-tenant-ai-platform-architecture.md) and [../scalability-governance-tradeoffs/01](../scalability-governance-tradeoffs/01-cost-vs-latency-vs-safety.md); this entry focuses on the **gateway product** itself. Deep dives below target **non-functional** requirements (latency, scale, failure, cost, security).",
+      "requirements": "**Functional** - Single ingress for chat/completions (stub\u2192BYOK). - Route by tenant/latency/cost/capability. - Optional semantic cache for safe prompt classes. - Explicit gateway vs sidecar and cache-as-service vs in-process. - Auth, RPM, metering, kill switches. **Non-functional** - Low gateway P99 vs model latency. - No cross-tenant cache. - Fail-closed vs fail-open is documented posture. - FinOps budgets pre-flight before tokens burn.",
+      "core_entities": "- **Route policy** - **Cache key** = tenant_id + embedding + model + policy_version - **Usage event** - **Provider adapter** - **Control posture** strict|demo",
+      "api_interface": "Staff+ callout: default deny cache for user-specific/tool prompts; X-Tenant-Id is first-class; 402/503 in strict mode.",
+      "data_flow": "Client \u2192 auth \u2192 tenant \u2192 budget pre-check \u2192 cache lookup \u2192 provider/stub \u2192 meter \u2192 optional store \u2192 response.",
+      "high_level_design_text": "Federated model plane (aegis-llm-gateway + aegis-semantic-cache + agent-finops) separate from AegisAI tool gateway (ADR-028). Shared gateway is org default; sidecar wins at edge/single-app fallback.",
       "high_level_design_mermaid": "",
-      "deep_dives": " "
+      "deep_dives": "Deep dive 1 gateway vs sidecar. Deep dive 2 cache-in-process vs cache-as-service. Deep dive 3 tenancy keying and poisoning. Deep dive 4 TTL vs tags; fail-closed vs fail-open; FinOps pre-flight placement."
     },
     "expected_strong_level": "principal"
   },
